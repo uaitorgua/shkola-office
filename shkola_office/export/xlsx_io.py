@@ -23,6 +23,28 @@ def _number(s: str):
         return s
 
 
+NUM_FORMATS = {"0.00": "0.00", "%": "0.0%", "# ##0": "#,##0", "0": "0", "грн": '#,##0.00 "₴"', "дата": "DD.MM.YYYY"}
+
+
+def _write_cond(ws, rules) -> None:
+    """Умовне форматування InterTab → правила Excel (CellIs / містить текст)."""
+    from openpyxl.formatting.rule import CellIsRule, FormulaRule
+    from openpyxl.styles import PatternFill
+    ops = {">": "greaterThan", "<": "lessThan", ">=": "greaterThanOrEqual", "<=": "lessThanOrEqual",
+           "=": "equal", "<>": "notEqual", "між": "between"}
+    for r in rules:
+        first = f"{get_column_letter(r.c0 + 1)}{r.r0 + 1}"
+        rng = f"{first}:{get_column_letter(r.c1 + 1)}{r.r1 + 1}"
+        col = r.color.lstrip("#").upper()
+        fill = PatternFill("solid", start_color=col, end_color=col)
+        q = lambda v: v if _number(v) != v else '"%s"' % v
+        if r.op == "містить":
+            ws.conditional_formatting.add(rng, FormulaRule(formula=['ISNUMBER(SEARCH("%s",%s))' % (r.a, first)], fill=fill))
+        else:
+            vals = [q(r.a), q(r.b)] if r.op == "між" else [q(r.a)]
+            ws.conditional_formatting.add(rng, CellIsRule(operator=ops[r.op], formula=vals, fill=fill))
+
+
 def save_sheets_xlsx(sheets: dict[str, tuple], path: Path) -> Path:
     """Аркуші табличного редактора: (raw, values, fmt). Формули Excel-сумісні зберігаються як формули
     (крапка з комою → кома), решта — значення; формат: жирний/курсив/вирівнювання/заливка/колір."""
@@ -32,6 +54,7 @@ def save_sheets_xlsx(sheets: dict[str, tuple], path: Path) -> Path:
     for name, item in sheets.items():
         raw, values, fmt = item[:3]
         charts = item[3] if len(item) > 3 else []
+        extra = item[4] if len(item) > 4 else {}
         ws = wb.create_sheet(name[:31] or "Аркуш")
         for i, row in enumerate(raw, 1):
             for j, text in enumerate(row, 1):
@@ -43,11 +66,16 @@ def save_sheets_xlsx(sheets: dict[str, tuple], path: Path) -> Path:
                     c.font = Font(bold=bool(f.get("bold")), italic=bool(f.get("italic")),
                                   color=(f["color"].lstrip("#").upper() if f.get("color") else None))
                     c.alignment = Alignment(horizontal=f.get("align") or "left", wrap_text=True, vertical="top")
+                    if f.get("num") in NUM_FORMATS:
+                        c.number_format = NUM_FORMATS[f["num"]]
                     if f.get("bg"):
                         c.fill = PatternFill("solid", fgColor=f["bg"].lstrip("#").upper())
         for j in range(1, max((len(r) for r in raw), default=0) + 1):
             width = max((len(str(r[j - 1])) for r in values if len(r) >= j), default=8)
             ws.column_dimensions[get_column_letter(j)].width = min(60, max(8, width + 2))
+        if extra.get("freeze"):
+            ws.freeze_panes = "A%d" % (int(extra["freeze"]) + 1)
+        _write_cond(ws, extra.get("cond") or [])
         if charts:
             from ..ui.charts import add_xlsx_chart
             for spec in charts:
@@ -88,6 +116,8 @@ def load_xlsx(path: Path, with_formats: bool = False):
                     except ValueError:
                         pass
             fmts["__charts__"] = charts_by_sheet.get(ws.title, [])
+            if ws.freeze_panes:
+                fmts["__freeze__"] = max(0, int("".join(ch for ch in ws.freeze_panes if ch.isdigit()) or 1) - 1)
         for i, row in enumerate(ws.iter_rows()):
             vals = []
             for j, c in enumerate(row):

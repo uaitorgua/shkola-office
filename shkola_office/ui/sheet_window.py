@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
+from PySide6.QtWidgets import (QMenu, QToolButton, QColorDialog, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMessageBox, QTabWidget, QToolBar, QVBoxLayout, QWidget)
 
 from ..config import APP_NAME, INTERTAB
@@ -19,6 +19,7 @@ from .banner import Banner
 from . import sheet_print
 from . import icons
 from .ribbon import RIBBON_STYLE, Ribbon
+from .sheet_extra import TEMPLATES as SHEET_TEMPLATES, CondDialog, FilterDialog, clear_filter, filter_column, freeze_rows, grades_preset, last_row
 from .sheet_model import Sheet, col_letters
 
 
@@ -109,6 +110,8 @@ class SheetWindow(QMainWindow):
         g.column(g.action("0,00 — два знаки", "hashtag", lambda: self._numfmt("0.00")),
                  g.action("% — відсотки", "percent", lambda: self._numfmt("%")),
                  g.action("1 000 — тисячі", "layers", lambda: self._numfmt("# ##0")))
+        g.column(g.action("₴ — гривні", "hashtag", lambda: self._numfmt("грн")),
+                 g.action("Дата дд.мм.рррр", "calendar", lambda: self._numfmt("дата")))
         g = home.group("Рядки й стовпці")
         g.grid([[g.action("Вставити рядок", "table-rows", lambda: sh().insert_row(max(0, sh().currentRow()))),
                  g.action("Вставити стовпець", "table-cols", lambda: sh().insert_col(max(0, sh().currentColumn())))],
@@ -124,6 +127,15 @@ class SheetWindow(QMainWindow):
         g = ins.group("Аркуші")
         g.big("Аркуш", "plus", lambda: self.add_sheet(f"Аркуш{self.tabs.count() + 1}", []), tip="Додати аркуш")
         g.big("Перейменувати", "edit", self._rename)
+        g = ins.group("Шаблон")
+        b_tpl = g.big("Шаблон", "new", None, tip="Журнал оцінок, табель, облік відвідування, розклад")
+        self._tpl_menu = QMenu(self)
+        for name in SHEET_TEMPLATES:
+            self._tpl_menu.addAction(name, lambda n=name: self.add_template(n))
+        for btn in g.findChildren(QToolButton):
+            if btn.defaultAction() is b_tpl:
+                btn.setMenu(self._tpl_menu)
+                btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         g = ins.group("Діаграми")
         g.big("Діаграма", "layers", self._insert_chart, tip="Стовпчикова, горизонтальна, лінійна або кругова — з виділеного діапазону")
         g.big("Діаграми аркуша", "eye", self._list_charts, tip="Переглянути, зберегти PNG або видалити графіки аркуша")
@@ -139,7 +151,7 @@ class SheetWindow(QMainWindow):
         self.cb_func.addItem("Функція…")
         for f_ in ("SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "IF", "SUMIF", "COUNTIF", "AVERAGEIF", "ROUND", "INT", "ABS",
                    "SQRT", "POWER", "MOD", "PRODUCT", "AND", "OR", "NOT", "LEN", "CONCAT", "UPPER", "LOWER", "TRIM", "LEFT",
-                   "RIGHT", "MID", "VLOOKUP", "ISBLANK", "ISNUMBER", "TODAY", "PI", "RAND"):
+                   "RIGHT", "MID", "VLOOKUP", "COUNTIFS", "SUMIFS", "AVERAGEIFS", "MAXIFS", "MINIFS", "MEDIAN", "MODE", "RANK", "ROUNDUP", "ROUNDDOWN", "COUNTBLANK", "ISBLANK", "ISNUMBER", "TODAY", "PI", "RAND"):
             self.cb_func.addItem(f_)
         self.cb_func.activated.connect(self._insert_func)
         self.cb_func.setFixedWidth(130)
@@ -152,6 +164,16 @@ class SheetWindow(QMainWindow):
         g = dt.group("Порядок")
         g.big("За зростанням", "sort-up", lambda: self._sort(False), tip="Сортувати за поточним стовпцем ↑")
         g.big("За спаданням", "sort-down", lambda: self._sort(True), tip="Сортувати за поточним стовпцем ↓")
+        g = dt.group("Фільтр")
+        g.big("Фільтр", "eye", self._filter, tip="Показати лише рядки з обраними значеннями поточного стовпця")
+        g.big("Показати все", "expand", lambda: clear_filter(sh()))
+        g = dt.group("Закріпити")
+        self.a_freeze = g.big("Верхній рядок", "layers", self._freeze, checkable=True,
+                              tip="Заголовок лишається видимим під час прокручування")
+        g = dt.group("Підсвітка")
+        g.big("За умовою", "highlighter", self._cond, tip="Підсвітити виділені комірки за умовою")
+        g.column(g.action("Оцінки 1–12", "paint", self._grades, tip="1–3 червоне, 4–6 жовте, 10–12 зелене"),
+                 g.action("Зняти підсвітку", "eraser", self._cond_clear))
         g = dt.group("Заповнення")
         g.big("Заповнити ↓", "fill", lambda: sh().fill_down(), "Ctrl+D")
         g = dt.group("Експорт")
@@ -323,6 +345,61 @@ class SheetWindow(QMainWindow):
         if ok and not self.sheet().find_next(text):
             self.statusBar().showMessage("Не знайдено")
 
+    # ---------- фільтр, закріплення, підсвітка, шаблони ----------
+    def _sel_box(self):
+        cells = self.sheet().selected_cells()
+        rs, cs = [r for r, _ in cells], [c for _, c in cells]
+        return min(rs), min(cs), max(rs), max(cs)
+
+    def _filter(self) -> None:
+        s = self.sheet()
+        c = max(0, s.currentColumn())
+        txt = lambda r: s.item(r, c).text() if s.item(r, c) else ""
+        rows = range(1, last_row(s) + 1)
+        d = FilterDialog(self, sorted({txt(r) for r in rows}), {txt(r) for r in rows if s.isRowHidden(r)})
+        if d.exec():
+            n = filter_column(s, c, d.shown())
+            self.statusBar().showMessage(f"Сховано рядків: {n}" if n else "Фільтр знято")
+
+    def _freeze(self) -> None:
+        freeze_rows(self.sheet(), 0 if self.sheet().freeze else 1)
+        self.a_freeze.setChecked(bool(self.sheet().freeze))
+
+    def _cond(self) -> None:
+        s = self.sheet()
+        r0, c0, r1, c1 = self._sel_box()
+        d = CondDialog(self, f"{col_letters(c0)}{r0 + 1}:{col_letters(c1)}{r1 + 1}")
+        if d.exec():
+            s.cond.append(d.rule(r0, c0, r1, c1))
+            s.recalc()
+
+    def _grades(self) -> None:
+        grades_preset(self.sheet(), *self._sel_box())
+
+    def _cond_clear(self) -> None:
+        s = self.sheet()
+        r0, c0, r1, c1 = self._sel_box()
+        if r1 > r0 or c1 > c0:
+            s.cond = [x for x in s.cond if not (x.r0 >= r0 and x.c0 >= c0 and x.r1 <= r1 and x.c1 <= c1)]
+        else:
+            s.cond = []
+        for (r, c) in list(s.raw):
+            it = s.item(r, c)
+            if it is not None:
+                s._apply_fmt(r, c, it)
+        s.recalc()
+
+    def add_template(self, name: str):
+        build, grades = SHEET_TEMPLATES[name]
+        rows = build()
+        fmts = {(0, j): {"bold": True, "align": "center", "bg": "#e3f1ec"} for j in range(len(rows[0]))}
+        s = self.add_sheet(name[:31], rows, fmts)
+        self.tabs.setCurrentWidget(s)
+        if grades:
+            grades_preset(s, *grades)
+        freeze_rows(s, 1)
+        return s
+
     def _numfmt(self, fmt: str) -> None:
         s = self.sheet()
         cur = s.fmt.get((s.currentRow(), s.currentColumn()), {}).get("num")
@@ -423,7 +500,7 @@ class SheetWindow(QMainWindow):
             sheets = {}
             for i in range(self.tabs.count()):
                 w: Sheet = self.tabs.widget(i)
-                sheets[self.tabs.tabText(i)] = (w.data(), w.values(), w.fmt, w.charts)
+                sheets[self.tabs.tabText(i)] = (w.data(), w.values(), w.fmt, w.charts, {"freeze": w.freeze, "cond": w.cond})
             save_sheets_xlsx(sheets, path)
         except Exception as e:
             QMessageBox.critical(self, "Зберегти", f"Не вдалося зберегти:\n{e}")

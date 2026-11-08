@@ -69,6 +69,20 @@ _FUNCS = {
         [v for v, m in zip((avgs or rng), rng) if _match(m, crit) and isinstance(v, (int, float))]),
     "VLOOKUP": lambda key, tbl, col, _exact=0: next((row[int(col) - 1] for row in tbl if row and row[0] == key), "#Н/Д"),
     "ISBLANK": lambda v: v in (None, ""), "ISNUMBER": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "COUNTIFS": lambda *a: sum(1 for i in range(len(a[0])) if all(_match(a[k][i], a[k + 1]) for k in range(0, len(a) - 1, 2))),
+    "SUMIFS": lambda s, *a: sum(v for i, v in enumerate(s) if isinstance(v, (int, float)) and not isinstance(v, bool)
+                                and all(_match(a[k][i], a[k + 1]) for k in range(0, len(a) - 1, 2))),
+    "AVERAGEIFS": lambda s, *a: (lambda xs: sum(xs) / len(xs) if xs else 0)(
+        [v for i, v in enumerate(s) if isinstance(v, (int, float)) and not isinstance(v, bool)
+         and all(_match(a[k][i], a[k + 1]) for k in range(0, len(a) - 1, 2))]),
+    "MEDIAN": lambda *a: (lambda xs: (xs[len(xs) // 2] if len(xs) % 2 else (xs[len(xs) // 2 - 1] + xs[len(xs) // 2]) / 2) if xs else 0)(sorted(_flat(a))),
+    "MODE": lambda *a: (lambda xs: max(xs, key=xs.count) if xs else 0)(_flat(a)),
+    "RANK": lambda x, rng, asc=0: 1 + sum(1 for v in _flat([rng]) if (v < x if asc else v > x)),
+    "ROUNDUP": lambda x, n=0: math.ceil(x * 10 ** int(n)) / 10 ** int(n) if x >= 0 else math.floor(x * 10 ** int(n)) / 10 ** int(n),
+    "ROUNDDOWN": lambda x, n=0: math.trunc(x * 10 ** int(n)) / 10 ** int(n),
+    "COUNTBLANK": lambda rng: sum(1 for v in rng if v in (None, "")),
+    "MAXIFS": lambda s, *a: max([v for i, v in enumerate(s) if isinstance(v, (int, float)) and all(_match(a[k][i], a[k + 1]) for k in range(0, len(a) - 1, 2))] or [0]),
+    "MINIFS": lambda s, *a: min([v for i, v in enumerate(s) if isinstance(v, (int, float)) and all(_match(a[k][i], a[k + 1]) for k in range(0, len(a) - 1, 2))] or [0]),
     "PI": lambda: math.pi, "RAND": lambda: __import__("random").random(),
 }
 
@@ -126,6 +140,10 @@ def fmt_value(v, num: str | None = None) -> str:
             return f"{v:,.0f}".replace(",", " ")
         if num == "0":
             return f"{round(v):d}"
+        if num == "грн":
+            return f"{v:,.2f}".replace(",", " ").replace(".", ",") + " ₴"
+        if num == "дата" and 20000 < v < 80000:          # число-дата як в Excel (від 30.12.1899)
+            return (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(v))).strftime("%d.%m.%Y")
     if isinstance(v, bool):
         return "ІСТИНА" if v else "ХИБНІСТЬ"
     if isinstance(v, float):
@@ -143,7 +161,10 @@ class Sheet(QTableWidget):
         self.setHorizontalHeaderLabels([col_letters(i) for i in range(cols)])
         self.raw: dict[tuple[int, int], str] = {}
         self.fmt: dict[tuple[int, int], dict] = {}
-        self.charts: list = []                 # ChartSpec — графіки аркуша (у XLSX стають діаграмами)
+        self.charts: list = []
+        self.cond: list = []                   # правила умовного форматування (sheet_extra.CondRule)
+        self.freeze = 0                        # закріплені верхні рядки
+        self.filter_col = None                 # ChartSpec — графіки аркуша (у XLSX стають діаграмами)
         self.itemChanged.connect(self._changed)
         self._lock = False
         # зміна розміру перетягуванням заголовків; подвійний клік по межі — за вмістом
@@ -182,6 +203,7 @@ class Sheet(QTableWidget):
         merges = fmts.pop("__merges__", [])
         widths = fmts.pop("__widths__", {})
         xcharts = fmts.pop("__charts__", [])
+        freeze = fmts.pop("__freeze__", 0)
         self.fmt = fmts
         for i, row in enumerate(rows):
             for j, v in enumerate(row):
@@ -199,6 +221,10 @@ class Sheet(QTableWidget):
         for r0, c0, nr, nc in merges:                 # об'єднані комірки з Excel
             if r0 < self.rowCount() and c0 < self.columnCount() and (nr > 1 or nc > 1):
                 self.setSpan(r0, c0, nr, nc)
+        if freeze:
+            from PySide6.QtCore import QTimer
+            from .sheet_extra import freeze_rows
+            QTimer.singleShot(0, lambda: freeze_rows(self, freeze))
         if xcharts:                                   # діаграми Excel → внутрішні графіки
             from .charts import ChartSpec, extract, render
             self.charts = []
@@ -325,6 +351,9 @@ class Sheet(QTableWidget):
             else:
                 it.setText(s)
             self._apply_fmt(r, c, it)
+        if self.cond:
+            from .sheet_extra import apply_cond
+            apply_cond(self)
         self._lock = False
 
     # ---------- формат ----------
