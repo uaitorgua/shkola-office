@@ -1,4 +1,4 @@
-"""Редактор документів (WYSIWYG, як Word у простому варіанті): сторінка A4 на сірому тлі, шрифти, розмір,
+"""InterText — редактор документів ГС «УАІТ» (WYSIWYG): сторінка A4 на сірому тлі, шрифти, розмір,
 Ж/К/П/закреслений, верхній/нижній індекс, колір тексту й виділення, вирівнювання, відступи, інтервали, списки,
 таблиці (вставка, рядки/стовпці, об'єднання, заголовок), зображення, символи, формули (LaTeX), розрив сторінки,
 пошук і заміна, скасувати/повторити, масштаб, лічильник слів, друк; DOCX/PDF/HTML/TXT."""
@@ -49,7 +49,7 @@ ADAPT_SHOWN: set[str] = set()
 
 
 def adaptation_notice(parent, origin: str) -> None:
-    """Попередження (раз на сеанс): субдодаток не є нативним Word/Excel і адаптує документ."""
+    """Попередження (раз на сеанс): InterText/InterTab адаптують чужий формат."""
     if origin in ADAPT_SHOWN:
         return
     ADAPT_SHOWN.add(origin)
@@ -929,7 +929,7 @@ class EditorWindow(QMainWindow):
             self.save_as("docx")
 
     def save_as(self, fmt: str) -> None:
-        filters = {"docx": "Word (*.docx)", "pdf": "PDF (*.pdf)", "html": "HTML (*.html)", "txt": "Текст (*.txt)"}
+        filters = {"docx": "Документ DOCX (*.docx)", "pdf": "PDF (*.pdf)", "html": "HTML (*.html)", "txt": "Текст (*.txt)"}
         start = str(self.path.with_suffix("." + fmt)) if self.path else f"документ.{fmt}"
         path, _ = QFileDialog.getSaveFileName(self, "Зберегти як", start, filters[fmt])
         if path:

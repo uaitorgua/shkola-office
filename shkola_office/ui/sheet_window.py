@@ -1,4 +1,4 @@
-"""Табличний редактор (як Excel у простому варіанті): аркуші, рядок формул, формат комірок (жирний, курсив,
+"""InterTab — табличний редактор ГС «УАІТ»: аркуші, рядок формул, формат комірок (жирний, курсив,
 вирівнювання, заливка, колір), рядки/стовпці, об'єднання, сортування, автосума, заповнення вниз, пошук,
 копіювання/вставка, відкриття і збереження XLSX/CSV."""
 
@@ -46,7 +46,7 @@ class SheetWindow(QMainWindow):
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.setMovable(True)
-        self.tabs.setTabPosition(QTabWidget.TabPosition.South)   # вкладки аркушів знизу, як в Excel
+        self.tabs.setTabPosition(QTabWidget.TabPosition.South)   # вкладки аркушів знизу
         from PySide6.QtWidgets import QVBoxLayout, QWidget
         central = QWidget()
         cl = QVBoxLayout(central)

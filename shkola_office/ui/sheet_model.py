@@ -182,7 +182,7 @@ class Sheet(QTableWidget):
         self.currentCellChanged.connect(self._grow_if_edge)
 
     def _grow_if_edge(self, r: int, c: int, *_):
-        """Біля краю додаємо ще рядків/стовпців — аркуш «нескінченний», як в Excel."""
+        """Біля краю додаємо ще рядків/стовпців — аркуш «нескінченний»."""
         if r >= self.rowCount() - 3:
             self.setRowCount(self.rowCount() + 50)
         if c >= self.columnCount() - 2:
