@@ -75,7 +75,24 @@ def apply_theme(pres: Presentation, name: str) -> None:
         s.elements = [e for e in s.elements if e.role != "decor"]
         for e in s.elements:
             _paint(e, t)
+            if e.role.startswith("lib:"):
+                _relib(pres, e, t)
         s.elements[:0] = t.decor(W, H, s.layout in ("Титул", "Тема уроку"))
+
+
+def _relib(pres: Presentation, e: Element, t: Theme) -> None:
+    from . import library
+    it = next((i for i in library.items() if i["id"] == e.role[4:]), None)
+    if it:
+        e.media = pres.add_media(f"lib_{it['id']}_{t.name}.svg", library.themed_svg(it, t))
+
+
+def lib_element(pres: Presentation, item: dict, size: float = 140) -> Element:
+    """Об'єкт бібліотеки як елемент слайда в кольорах поточної теми (перефарбовується зі зміною теми)."""
+    W, H = pres.size
+    e = Element("image", (W - size) / 2, (H - size) / 2, size, size, role="lib:" + item["id"])
+    _relib(pres, e, THEMES.get(pres.theme or DEFAULT_THEME, THEMES[DEFAULT_THEME]))
+    return e
 
 
 # ---------- макети ----------

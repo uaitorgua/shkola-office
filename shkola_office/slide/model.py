@@ -118,7 +118,7 @@ def _rgb(c: str):
     return RGBColor.from_string(c.lstrip("#")[:6].upper())
 
 
-def export_pptx(pres: Presentation, path: Path) -> None:
+def export_pptx(pres: Presentation, path: Path, raster=None) -> None:
     """Редагований PPTX: текст лишається текстом, фігури — автофігурами, нотатки — нотатками доповідача."""
     import io
 
@@ -139,7 +139,12 @@ def export_pptx(pres: Presentation, path: Path) -> None:
         for e in s.elements:
             box = (Pt(e.x), Pt(e.y), Pt(e.w), Pt(e.h))
             if e.kind == "image" and e.media in pres.media:
-                sl.shapes.add_picture(io.BytesIO(pres.media[e.media]), *box)
+                data = pres.media[e.media]
+                if e.media.lower().endswith(".svg"):          # PPTX не бере SVG напряму → PNG (raster від Qt)
+                    if raster is None:
+                        continue
+                    data = raster(data, int(e.w * 4), int(e.h * 4))
+                sl.shapes.add_picture(io.BytesIO(data), *box)
                 continue
             if e.kind == "shape" and e.shape == "Лінія":
                 ln = sl.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Pt(e.x), Pt(e.y + e.h / 2), Pt(e.x + e.w), Pt(e.y + e.h / 2))

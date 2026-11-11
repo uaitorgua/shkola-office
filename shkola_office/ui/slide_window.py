@@ -3,15 +3,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSize, QSizeF, Qt, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QPointF, QRectF, QSize, QSizeF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QImage, QPainter, QPageLayout, QPageSize, QPdfWriter, QPixmap, QTextOption
 from PySide6.QtWidgets import (QColorDialog, QFileDialog, QGraphicsItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView,
                                QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
                                QSplitter, QToolButton, QVBoxLayout, QWidget)
 
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtWidgets import QComboBox, QDockWidget, QHBoxLayout, QLineEdit
+
 from ..config import APP_NAME
+from ..slide import library
 from ..slide.model import Element, Presentation, Slide, export_pptx
-from ..slide.themes import LAYOUTS, THEMES, apply_theme, make_slide, new_presentation
+from ..slide.themes import LAYOUTS, THEMES, apply_theme, lib_element, make_slide, new_presentation
 from .banner import Banner
 from .logo import app_icon
 from .ribbon import RIBBON_STYLE, Ribbon
@@ -23,6 +27,9 @@ HANDLE = 10
 
 def paint_element(p: QPainter, e: Element, pres: Presentation, r: QRectF | None = None) -> None:
     r = r or QRectF(e.x, e.y, e.w, e.h)
+    if e.kind == "image" and e.media.lower().endswith(".svg"):
+        QSvgRenderer(QByteArray(pres.media.get(e.media, b""))).render(p, r)
+        return
     if e.kind == "image":
         img = QImage.fromData(pres.media.get(e.media, b""))
         if not img.isNull():
@@ -72,6 +79,18 @@ def slide_image(pres: Presentation, s: Slide, width: int = 192) -> QImage:
     paint_slide(p, pres, s)
     p.end()
     return img
+
+
+def svg_png(data: bytes, w: int, h: int) -> bytes:
+    img = QImage(max(1, w), max(1, h), QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    QSvgRenderer(QByteArray(data)).render(p)
+    p.end()
+    buf = QBuffer()
+    buf.open(QBuffer.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    return bytes(buf.data())
 
 
 def export_pdf(pres: Presentation, path: Path) -> None:
@@ -203,7 +222,56 @@ class SlideWindow(QMainWindow):
         tl.addWidget(Banner(INTERSLIDE, "ПРЕЗЕНТАЦІЇ · УРОКИ · КВІЗИ · PPTX · PDF", compact=True))
         tl.addWidget(self.ribbon)
         self.setMenuWidget(top)
+        self._library()
         self.refresh(0)
+
+    # ---------- бібліотека ----------
+    def _library(self) -> None:
+        dock = QDockWidget("Бібліотека", self)
+        dock.setObjectName("library")
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(6, 6, 6, 6)
+        self.lib_find = QLineEdit()
+        self.lib_find.setPlaceholderText("Пошук: книга, атом, свято…")
+        self.lib_topic = QComboBox()
+        self.lib_topic.addItem("Усі теми", "")
+        for t in library.topics():
+            self.lib_topic.addItem(t, t)
+        self.lib_list = QListWidget()
+        self.lib_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.lib_list.setIconSize(QSize(56, 56))
+        self.lib_list.setGridSize(QSize(84, 84))
+        self.lib_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.lib_list.setMovement(QListWidget.Movement.Static)
+        self.lib_list.itemDoubleClicked.connect(lambda it: self.add_lib(it.data(Qt.ItemDataRole.UserRole)))
+        lay.addWidget(self.lib_find)
+        lay.addWidget(self.lib_topic)
+        lay.addWidget(self.lib_list, 1)
+        dock.setWidget(box)
+        dock.setMinimumWidth(290)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        self.lib_dock = dock
+        self.lib_find.textChanged.connect(self.fill_library)
+        self.lib_topic.currentIndexChanged.connect(self.fill_library)
+        self.fill_library()
+
+    def fill_library(self) -> None:
+        self.lib_list.clear()
+        theme = THEMES.get(self.pres.theme)
+        for it in library.search(self.lib_find.text(), self.lib_topic.currentData() or ""):
+            pm = QPixmap(QSize(112, 112))
+            pm.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pm)
+            QSvgRenderer(QByteArray(library.themed_svg(it, theme if theme and theme.bg == "#ffffff" else None))).render(p)
+            p.end()
+            w = QListWidgetItem(pm, it["title"])
+            w.setToolTip(f'{it["title"]} · {it["topic"]} · {it["tags"]}')
+            w.setData(Qt.ItemDataRole.UserRole, it)
+            self.lib_list.addItem(w)
+
+    def add_lib(self, item: dict) -> None:
+        self.add_elem(lib_element(self.pres, item))
 
     # ---------- стрічка ----------
     def _ribbon(self) -> None:
@@ -246,6 +314,8 @@ class SlideWindow(QMainWindow):
                                                               color="#ffffff")))
         self._popup(g, b, m)
         g.big("Зображення", "image", self.add_image)
+        g.big("Бібліотека", "book", lambda: self.lib_dock.setVisible(not self.lib_dock.isVisible()),
+              tip="Шкільні векторні об'єкти за темами: подвійний клік — на слайд")
         dz = rb.tab("Дизайн")
         g = dz.group("Тема")
         for name in THEMES:
@@ -279,6 +349,7 @@ class SlideWindow(QMainWindow):
     def set_theme(self, name: str) -> None:
         apply_theme(self.pres, name)
         self.refresh()
+        self.fill_library()
         self.setWindowModified(True)
 
     # ---------- стан ----------
@@ -449,7 +520,7 @@ class SlideWindow(QMainWindow):
         try:
             suf = path.suffix.lower()
             if suf == ".pptx":
-                export_pptx(self.pres, path)
+                export_pptx(self.pres, path, raster=svg_png)
             elif suf == ".pdf":
                 export_pdf(self.pres, path)
             else:
