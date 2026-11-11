@@ -27,7 +27,7 @@ def answer_text(q: dict) -> str:
 
 def make_quiz_slide(pres: Presentation, q: dict, seed: int | None = None) -> Slide:
     """q: kind, question, options, answer (індекси для choice/truefalse, текст для input), points."""
-    from .themes import DEFAULT_THEME, THEMES, _paint
+    from .themes import DEFAULT_THEME, THEMES, _paint, decorate
     q = {"points": 1, **q}
     if q["kind"] == "truefalse":
         q["options"] = ["Правда", "Неправда"]
@@ -82,7 +82,7 @@ def make_quiz_slide(pres: Presentation, q: dict, seed: int | None = None) -> Sli
     s.bg = t.bg
     for e in s.elements:
         _paint(e, t)
-    s.elements[:0] = t.decor(W, H, False)
+    decorate(pres, s, t)
     return s
 
 

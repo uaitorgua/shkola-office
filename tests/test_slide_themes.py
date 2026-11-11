@@ -36,11 +36,11 @@ for theme in THEMES:
     p.end()
     sheet.save(str(D / f"layouts_{theme}.png"))
     decor = sum(e.role == "decor" for e in w.pres.slides[0].elements)
-    assert decor >= 2, theme
+    assert decor >= 1, theme
 w.set_ratio("4:3")
 assert all(e.x + e.w <= 721 for s in w.pres.slides for e in s.elements if e.role == "decor")
 assert w.save_to(D / "t.pptx") and len(PP(str(D / "t.pptx")).slides) == 12
 assert w.save_to(D / "t.islide")
 w.load(D / "t.islide")
-assert w.pres.theme == "Класна дошка"
+assert w.pres.theme == list(THEMES)[-1]
 print("ТЕМИ Й МАКЕТИ OK", D)

@@ -17,6 +17,7 @@ from ..config import APP_NAME
 from ..slide import library
 from ..slide.model import Element, Presentation, Slide, export_pptx, static_slides
 from ..slide.quiz import KINDS, export_html, make_quiz_slide
+from ..slide.scenarios import SCENARIOS, build as build_scenario
 from ..slide.themes import LAYOUTS, THEMES, apply_theme, lib_element, make_slide, new_presentation
 from .banner import Banner
 from .logo import app_icon
@@ -293,6 +294,9 @@ class SlideWindow(QMainWindow):
         f.addAction("Експорт у PPTX…", lambda: self.save_as("pptx"))
         f.addAction("Експорт у PDF…", lambda: self.save_as("pdf"))
         f.addAction("HTML-квіз для учнів…", lambda: self.save_as("html"))
+        sc = f.addMenu("Нова за сценарієм")
+        for name in SCENARIOS:
+            sc.addAction(name, lambda n=name: self.from_scenario(n))
         sl = rb.tab("Слайди")
         g = sl.group("Новий")
         g.big("Титул", "new", lambda: self.add_layout("Титул"))
@@ -303,6 +307,11 @@ class SlideWindow(QMainWindow):
         self._popup(g, b, m)
         g.big("Ще такий", "copy", lambda: self.add_layout(self.slide().layout or "Два стовпці"), key="Ctrl+M",
               tip="Новий слайд із тим самим макетом")
+        b = g.big("Сценарій", "wand", None, tip="Готова презентація: урок, квіз, збори, педрада, виховна година, свято")
+        m2 = QMenu(self)
+        for name in SCENARIOS:
+            m2.addAction(name, lambda n=name: self.from_scenario(n))
+        self._popup(g, b, m2)
         g = sl.group("Упорядкувати")
         g.column(g.action("Дублювати", "copy", self.dup_slide), g.action("Видалити", "trash", self.del_slide))
         g.column(g.action("Вище", "sort-up", lambda: self.move_slide(-1)),
@@ -373,6 +382,15 @@ class SlideWindow(QMainWindow):
         self.refresh()
         self.fill_library()
         self.setWindowModified(True)
+
+    def from_scenario(self, name: str) -> None:
+        if self.isWindowModified() and QMessageBox.question(
+                self, INTERSLIDE, "Замінити поточну презентацію сценарієм? Незбережені зміни зникнуть.")                 != QMessageBox.StandardButton.Yes:
+            return
+        self.pres, self.path = build_scenario(name, self.pres.ratio), None
+        self.refresh(0)
+        self.fill_library()
+        self.setWindowModified(False)
 
     # ---------- квіз і показ ----------
     def quiz_dialog(self, kind: str) -> None:

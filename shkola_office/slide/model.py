@@ -164,6 +164,8 @@ def export_pptx(pres: Presentation, path: Path, raster=None) -> None:
                 continue
             if e.kind == "shape":
                 sh = sl.shapes.add_shape(getattr(MSO_SHAPE, _PPTX_SHAPES.get(e.shape, "RECTANGLE")), *box)
+                if e.shape == "Скруглений прямокутник":            # радіус як у редакторі (≤14 pt)
+                    sh.adjustments[0] = min(0.2, 14 / max(1, min(e.w, e.h)))
                 sh.fill.solid()
                 sh.fill.fore_color.rgb = _rgb(e.fill or "#1d7a66")
                 sh.line.color.rgb = _rgb(e.line or e.fill or "#135548")

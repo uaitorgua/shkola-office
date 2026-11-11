@@ -21,6 +21,7 @@ class Theme:
     font: str
     title_font: str
     decor: Callable[[float, float, bool], list[Element]]   # (W, H, титульний?) → декор
+    on_accent: str = ""       # текст на акцентних плашках ("" — колір тла)
 
 
 def _minimal_decor(W: float, H: float, cover: bool) -> list[Element]:
@@ -44,13 +45,87 @@ def _board_decor(W: float, H: float, cover: bool) -> list[Element]:
     return out
 
 
+def _svg(W, H, body: str) -> Element:
+    s = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W:g} {H:g}" width="{W:g}" height="{H:g}">{body}</svg>'
+    return Element("image", 0, 0, W, H, s, role="decor")
+
+
+def _grid_decor(W, H, cover):
+    step = 20
+    lines = "".join(f'<line x1="{x}" y1="0" x2="{x}" y2="{H:g}"/>' for x in range(step, int(W), step))
+    lines += "".join(f'<line x1="0" y1="{y}" x2="{W:g}" y2="{y}"/>' for y in range(step, int(H), step))
+    body = f'<g stroke="#cfe0f3" stroke-width="1">{lines}</g>' +         f'<line x1="{W - 40:g}" y1="0" x2="{W - 40:g}" y2="{H:g}" stroke="#e98a84" stroke-width="2"/>'
+    return [_svg(W, H, body)]
+
+
+def _nature_decor(W, H, cover):
+    hills = (f'<ellipse cx="{W * .2:g}" cy="{H + 40:g}" rx="{W * .45:g}" ry="{90 if cover else 46}" fill="#b9d89a"/>'
+             f'<ellipse cx="{W * .85:g}" cy="{H + 50:g}" rx="{W * .4:g}" ry="{110 if cover else 56}" fill="#8fc06a"/>')
+    leaf = lambda x, y, r, c: (f'<path transform="translate({x:g},{y:g}) rotate({r})" d="M0 0C10-26 40-30 60-24 54 0 30 14 0 0z" '
+                               f'fill="{c}"/><path transform="translate({x:g},{y:g}) rotate({r})" d="M0 0L52-20" '
+                               f'stroke="#f4f8ec" stroke-width="2"/>')
+    body = hills + leaf(W - 90, 60, -20, "#6aa84f") + leaf(W - 60, 40, 30, "#8fc06a")
+    if cover:
+        body += leaf(40, H - 150, -40, "#6aa84f") + f'<circle cx="{W - 140:g}" cy="70" r="26" fill="#f2c94c"/>'
+    return [_svg(W, H, body)]
+
+
+def _space_decor(W, H, cover):
+    import random as _r
+    rnd = _r.Random(7)
+    stars = "".join(f'<circle cx="{rnd.uniform(0, W):.0f}" cy="{rnd.uniform(0, H):.0f}" r="{rnd.choice((0.8, 1.2, 1.8))}" '
+                    f'fill="#ffffff" opacity="{rnd.uniform(.35, .9):.2f}"/>' for _ in range(110))
+    cx, cy, r = (W - 70, H - 60, 80) if cover else (W - 34, 30, 16)
+    planet = (f'<circle cx="{cx:g}" cy="{cy:g}" r="{r}" fill="#7c5cff" opacity=".85"/>'
+              f'<ellipse cx="{cx:g}" cy="{cy:g}" rx="{r * 1.5:g}" ry="{r * .23:g}" '
+              f'fill="none" stroke="#ffd66b" stroke-width="3" transform="rotate(-18 {cx:g} {cy:g})"/>')
+    return [_svg(W, H, stars + planet)]
+
+
+def _parchment_decor(W, H, cover):
+    body = (f'<rect x="14" y="14" width="{W - 28:g}" height="{H - 28:g}" fill="none" stroke="#8b4a2b" stroke-width="3"/>'
+            f'<rect x="22" y="22" width="{W - 44:g}" height="{H - 44:g}" fill="none" stroke="#c99a3c" stroke-width="1.5"/>'
+            + "".join(f'<path transform="translate({x:g},{y:g})" d="M0 -9L9 0 0 9-9 0z" fill="#8b4a2b"/>'
+                      for x, y in ((22, 22), (W - 22, 22), (22, H - 22), (W - 22, H - 22))))
+    return [_svg(W, H, body)]
+
+
+def _bright_decor(W, H, cover):
+    cols = ("#e8573f", "#2fa4e7", "#f7b928", "#3dbb6b", "#a05be0")
+    import random as _r
+    rnd = _r.Random(3)
+    dots = "".join(f'<circle cx="{x:g}" cy="{y:g}" r="{rnd.choice((6, 9, 13))}" fill="{cols[i % 5]}" opacity=".8"/>'
+                   for i, (x, y) in enumerate([(rnd.uniform(0, W), rnd.uniform(0, 26)) for _ in range(14)]
+                                              + [(rnd.uniform(0, W), H - rnd.uniform(0, 26)) for _ in range(14)]))
+    wave = f'<path d="M0 {H - 34:g}q{W / 8:g}-26 {W / 4:g} 0t{W / 4:g} 0 {W / 4:g} 0 {W / 4:g} 0V{H:g}H0z" fill="#ffe0a3"/>'
+    return [_svg(W, H, wave + dots)]
+
+
 THEMES: dict[str, Theme] = {
     "Мінімал ГС": Theme("Мінімал ГС", "#ffffff", "#135548", "#1f2d2a", "#1d7a66", "#e0a526", "#eef5f2", "#1f2d2a",
                         "Segoe UI", "Segoe UI Semibold", _minimal_decor),
     "Класна дошка": Theme("Класна дошка", "#24453a", "#f6f1d8", "#e8efe9", "#f2c14e", "#9fd3c7", "#2f5a4b", "#f6f1d8",
                           "Segoe Print", "Segoe Print", _board_decor),
+    "Зошит у клітинку": Theme("Зошит у клітинку", "#fbfdff", "#1f4e8c", "#22303c", "#e2574c", "#2f8f6f", "#eaf2fb",
+                              "#22303c", "Segoe UI", "Segoe Print", _grid_decor, "#ffffff"),
+    "Природа": Theme("Природа", "#f4f8ec", "#2f5d27", "#273126", "#4e8a3a", "#e0a526", "#e5efd6", "#273126",
+                     "Segoe UI", "Segoe UI Semibold", _nature_decor, "#ffffff"),
+    "Космос": Theme("Космос", "#0f1b3d", "#ffd66b", "#e6ecff", "#7c5cff", "#ffd66b", "#1d2b5a", "#e6ecff",
+                    "Segoe UI", "Segoe UI Semibold", _space_decor, "#0f1b3d"),
+    "Пергамент": Theme("Пергамент", "#f3e7c9", "#6b3a1e", "#3b2a1a", "#8b4a2b", "#c99a3c", "#ead8ae", "#3b2a1a",
+                       "Georgia", "Georgia", _parchment_decor, "#f3e7c9"),
+    "Яскравий для молодших": Theme("Яскравий для молодших", "#fff8e7", "#e8573f", "#2b2b3a", "#2fa4e7", "#f7b928",
+                                   "#ffe9c2", "#2b2b3a", "Segoe UI", "Segoe UI Black", _bright_decor, "#ffffff"),
 }
 DEFAULT_THEME = "Мінімал ГС"
+
+
+def _ink(fill: str) -> str:
+    """Колір тексту на заливці: темний на світлому, білий на темному (контраст)."""
+    c = fill.lstrip("#")
+    r, g, b = (int(c[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    lum = 0.2126 * r ** 2.2 + 0.7152 * g ** 2.2 + 0.0722 * b ** 2.2
+    return "#1d2423" if lum > 0.32 else "#ffffff"
 
 
 def _paint(e: Element, t: Theme) -> None:
@@ -60,7 +135,7 @@ def _paint(e: Element, t: Theme) -> None:
         e.color, e.font = t.body, t.font
     elif e.role in ("accent", "accent2"):
         e.fill = t.accent if e.role == "accent" else t.accent2
-        e.line, e.color, e.font = e.fill, (t.bg if e.kind == "shape" else t.body), t.font
+        e.line, e.color, e.font = e.fill, (_ink(e.fill) if e.kind == "shape" else t.body), t.font
     elif e.role == "card" or e.role.startswith("opt:"):
         e.fill, e.line, e.color, e.font = t.card, t.card, t.card_text, t.font
 
@@ -77,7 +152,18 @@ def apply_theme(pres: Presentation, name: str) -> None:
             _paint(e, t)
             if e.role.startswith("lib:"):
                 _relib(pres, e, t)
-        s.elements[:0] = t.decor(W, H, s.layout in ("Титул", "Тема уроку"))
+        decorate(pres, s, t)
+
+
+def decorate(pres: Presentation, s: Slide, t: Theme) -> None:
+    """Додати декор теми на початок слайда. SVG-декор приходить у Element.text і переїжджає в media."""
+    W, H = pres.size
+    els = t.decor(W, H, s.layout in ("Титул", "Тема уроку"))
+    for e in els:
+        if e.kind == "image" and e.text.startswith("<svg"):
+            e.media = pres.add_media(f"theme_{t.name}_{int(W)}x{int(H)}.svg", e.text.encode("utf-8"))
+            e.text = ""
+    s.elements[:0] = els
 
 
 def _relib(pres: Presentation, e: Element, t: Theme) -> None:
@@ -170,7 +256,7 @@ def make_slide(layout: str, pres: Presentation) -> Slide:
     s.bg = t.bg
     for e in s.elements:
         _paint(e, t)
-    s.elements[:0] = t.decor(W, H, layout in ("Титул", "Тема уроку"))
+    decorate(pres, s, t)
     return s
 
 
