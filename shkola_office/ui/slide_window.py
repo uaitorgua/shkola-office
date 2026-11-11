@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (QColorDialog, QFileDialog, QGraphicsItem, QGraphi
                                QSplitter, QToolButton, QVBoxLayout, QWidget)
 
 from ..config import APP_NAME
-from ..slide.model import Element, Presentation, Slide, content_slide, export_pptx, title_slide
+from ..slide.model import Element, Presentation, Slide, export_pptx
+from ..slide.themes import LAYOUTS, THEMES, apply_theme, make_slide, new_presentation
 from .banner import Banner
 from .logo import app_icon
 from .ribbon import RIBBON_STYLE, Ribbon
@@ -42,9 +43,15 @@ def paint_element(p: QPainter, e: Element, pres: Presentation, r: QRectF | None 
         p.setPen(QColor(e.color))
         al = {"left": Qt.AlignmentFlag.AlignLeft, "center": Qt.AlignmentFlag.AlignHCenter,
               "right": Qt.AlignmentFlag.AlignRight}.get(e.align, Qt.AlignmentFlag.AlignLeft)
-        opt = QTextOption(al | (Qt.AlignmentFlag.AlignVCenter if e.kind == "shape" else Qt.AlignmentFlag.AlignTop))
+        card = e.kind == "shape" and e.align == "left"            # картка з текстом: зверху, з полями
+        opt = QTextOption(al)
         opt.setWrapMode(QTextOption.WrapMode.WordWrap)
-        p.drawText(r.adjusted(6, 4, -6, -4), e.text, opt)
+        pad = 18 if card else 6
+        box = r.adjusted(pad, pad if card else 4, -pad, -pad)
+        if e.kind == "shape" and not card:                       # по вертикалі — по центру
+            h = p.fontMetrics().boundingRect(box.toRect(), int(al) | int(Qt.TextFlag.TextWordWrap), e.text).height()
+            box.setTop(box.top() + max(0, (box.height() - h) / 2))
+        p.drawText(box, e.text, opt)
 
 
 def paint_slide(p: QPainter, pres: Presentation, s: Slide) -> None:
@@ -167,7 +174,7 @@ class SlideWindow(QMainWindow):
         self.resize(1280, 800)
         self.setStyleSheet(RIBBON_STYLE)
         self.path: Path | None = None
-        self.pres = pres or Presentation([title_slide()])
+        self.pres = pres or new_presentation()
         self.cur = 0
         self.thumbs = QListWidget()
         self.thumbs.setIconSize(QSize(176, 99))
@@ -213,8 +220,14 @@ class SlideWindow(QMainWindow):
         f.addAction("Експорт у PDF…", lambda: self.save_as("pdf"))
         sl = rb.tab("Слайди")
         g = sl.group("Новий")
-        g.big("Титул", "new", lambda: self.add_slide(title_slide(ratio=self.pres.ratio)))
-        g.big("Слайд", "plus", lambda: self.add_slide(content_slide(ratio=self.pres.ratio)), key="Ctrl+M")
+        g.big("Титул", "new", lambda: self.add_layout("Титул"))
+        b = g.big("Макет", "plus", None, tip="Новий слайд за макетом уроку")
+        m = QMenu(self)
+        for k in LAYOUTS:
+            m.addAction(k, lambda k=k: self.add_layout(k))
+        self._popup(g, b, m)
+        g.big("Ще такий", "copy", lambda: self.add_layout(self.slide().layout or "Два стовпці"), key="Ctrl+M",
+              tip="Новий слайд із тим самим макетом")
         g = sl.group("Упорядкувати")
         g.column(g.action("Дублювати", "copy", self.dup_slide), g.action("Видалити", "trash", self.del_slide))
         g.column(g.action("Вище", "sort-up", lambda: self.move_slide(-1)),
@@ -231,11 +244,12 @@ class SlideWindow(QMainWindow):
         for k in SHAPES:
             m.addAction(k, lambda k=k: self.add_elem(Element("shape", 120, 120, 220, 140, shape=k, fill="#1d7a66", align="center",
                                                               color="#ffffff")))
-        for btn in g.findChildren(QToolButton):
-            if btn.defaultAction() is b:
-                btn.setMenu(m)
-                btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._popup(g, b, m)
         g.big("Зображення", "image", self.add_image)
+        dz = rb.tab("Дизайн")
+        g = dz.group("Тема")
+        for name in THEMES:
+            g.big(name, "palette", lambda n=name: self.set_theme(n), tip="Перефарбувати всі слайди в тему")
         fm = rb.tab("Формат")
         g = fm.group("Текст")
         g.column(g.action("Жирний", "bold", lambda: self._fmt(bold=None)),
@@ -252,6 +266,20 @@ class SlideWindow(QMainWindow):
         g.column(g.action("Наперед", "arrow-right", lambda: self._z(1)), g.action("Назад", "arrow-left", lambda: self._z(-1)))
         g.big("Видалити", "trash", self.del_elems, key="Delete")
         rb.finish(mb)
+
+    def _popup(self, g, act, menu) -> None:
+        for btn in g.findChildren(QToolButton):
+            if btn.defaultAction() is act:
+                btn.setMenu(menu)
+                btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+
+    def add_layout(self, name: str) -> None:
+        self.add_slide(make_slide(name, self.pres))
+
+    def set_theme(self, name: str) -> None:
+        apply_theme(self.pres, name)
+        self.refresh()
+        self.setWindowModified(True)
 
     # ---------- стан ----------
     def slide(self) -> Slide:
@@ -324,6 +352,7 @@ class SlideWindow(QMainWindow):
         for s in self.pres.slides:
             for e in s.elements:
                 e.x, e.w = e.x * k, e.w * k
+        apply_theme(self.pres, self.pres.theme)
         self.refresh()
 
     def slide_bg(self) -> None:
@@ -402,7 +431,7 @@ class SlideWindow(QMainWindow):
 
     # ---------- файли ----------
     def new(self) -> None:
-        self.pres, self.path = Presentation([title_slide()]), None
+        self.pres, self.path = new_presentation(self.pres.theme or "Мінімал ГС"), None
         self.refresh(0)
 
     def load(self, path: Path) -> None:

@@ -13,7 +13,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 import fitz  # noqa: E402
 from pptx import Presentation as PP  # noqa: E402
 
-from shkola_office.slide.model import Element, Presentation, content_slide  # noqa: E402
+from shkola_office.slide.model import Element, Presentation, content_slide  # noqa: E402,F401
 from shkola_office.ui.slide_window import SlideWindow  # noqa: E402
 
 D = Path(tempfile.mkdtemp())

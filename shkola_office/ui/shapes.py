@@ -29,7 +29,8 @@ def draw_shape(kind: str, w: int, h: int, fill: str = "#1d7a66", line: str = "#1
     if kind == "Прямокутник":
         p.drawRect(r)
     elif kind == "Скруглений прямокутник":
-        p.drawRoundedRect(r, min(r.width(), r.height()) * 0.2, min(r.width(), r.height()) * 0.2)
+        rad = min(min(r.width(), r.height()) * 0.2, 14 * scale)
+        p.drawRoundedRect(r, rad, rad)
     elif kind == "Еліпс":
         p.drawEllipse(r)
     elif kind == "Трикутник":

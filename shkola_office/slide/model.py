@@ -29,6 +29,7 @@ class Element:
     shape: str = "Прямокутник"         # назва з ui.shapes.SHAPES
     media: str = ""                    # ім'я файлу в media/ для image
     font: str = ""                     # "" — шрифт теми
+    role: str = ""                     # title | body | accent | decor — тема перефарбовує за роллю
 
     @classmethod
     def from_dict(cls, d: dict) -> "Element":
@@ -54,6 +55,7 @@ class Presentation:
     ratio: str = "16:9"
     title: str = ""
     font: str = "Segoe UI"
+    theme: str = ""
     media: dict[str, bytes] = field(default_factory=dict, repr=False)
 
     @property
@@ -71,7 +73,7 @@ class Presentation:
     # ---------- .islide ----------
     def to_json(self) -> dict:
         return {"format": "islide", "version": FORMAT_VERSION, "ratio": self.ratio, "title": self.title,
-                "font": self.font, "slides": [{"bg": s.bg, "notes": s.notes, "layout": s.layout,
+                "font": self.font, "theme": self.theme, "slides": [{"bg": s.bg, "notes": s.notes, "layout": s.layout,
                                                "elements": [asdict(e) for e in s.elements]} for s in self.slides]}
 
     def save(self, path: Path) -> None:
@@ -89,7 +91,7 @@ class Presentation:
             d = json.loads(z.read("presentation.json").decode("utf-8"))
             media = {n[6:]: z.read(n) for n in z.namelist() if n.startswith("media/") and len(n) > 6}
         return cls([Slide.from_dict(s) for s in d.get("slides", [])], d.get("ratio", "16:9"),
-                   d.get("title", ""), d.get("font", "Segoe UI"), media)
+                   d.get("title", ""), d.get("font", "Segoe UI"), d.get("theme", ""), media)
 
 
 def title_slide(title: str = "Тема уроку", sub: str = "Клас · дата", ratio: str = "16:9") -> Slide:
