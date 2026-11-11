@@ -8,6 +8,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QPA_FONTDIR", "C:/Windows/Fonts")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import shkola_office  # noqa: E402
+shkola_office.configure(DATA_DIR=Path(tempfile.mkdtemp()) / "appdata")   # не чіпати «Нещодавні» користувача
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 

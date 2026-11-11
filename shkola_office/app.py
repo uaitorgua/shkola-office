@@ -25,6 +25,16 @@ RECENT = config.DATA_DIR / "recent.json"
 FILTER = "Файли Офісу ШКОЛА (*.docx *.itext *.html *.htm *.txt *.xlsx *.itab *.csv *.islide *.idata *.db *.sqlite);;Усі файли (*)"
 
 
+APP_ICONS = config.OFFICE_ASSETS / "app-icons"
+ICON_ID = {"text": "intertext", "tab": "intertab", "slide": "interslide", "data": "interdata"}
+
+
+def app_icon_for(k: str):
+    from PySide6.QtGui import QIcon
+    f = APP_ICONS / f"{ICON_ID.get(k, 'ofis')}.svg"
+    return QIcon(str(f)) if f.exists() else app_icon()
+
+
 def kind_of(path: Path) -> str | None:
     suf = path.suffix.lower()
     return next((k for k, v in EDITORS.items() if suf in v[3]), None)
@@ -64,9 +74,8 @@ class StartWindow(QMainWindow):
             b = QToolButton()
             b.setObjectName("tile")
             b.setText(f"{name}\n{sub}")
-            if icons.available():
-                b.setIcon(icons.icon(ic))
-            b.setIconSize(QSize(48, 48))
+            b.setIcon(app_icon_for(k))
+            b.setIconSize(QSize(64, 64))
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             b.setMinimumSize(380, 130)
             b.clicked.connect(lambda _=False, k=k: self.open_editor(k))
@@ -138,6 +147,7 @@ class StartWindow(QMainWindow):
         else:
             from .ui.data_window import DataWindow
             w = DataWindow()
+        w.setWindowIcon(app_icon_for(k))
         if hasattr(w, "saved"):
             w.saved.connect(lambda p: (remember(p), self.fill_recent()))
         self.windows.append(w)
