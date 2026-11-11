@@ -61,7 +61,7 @@ def _paint(e: Element, t: Theme) -> None:
     elif e.role in ("accent", "accent2"):
         e.fill = t.accent if e.role == "accent" else t.accent2
         e.line, e.color, e.font = e.fill, (t.bg if e.kind == "shape" else t.body), t.font
-    elif e.role == "card":
+    elif e.role == "card" or e.role.startswith("opt:"):
         e.fill, e.line, e.color, e.font = t.card, t.card, t.card_text, t.font
 
 

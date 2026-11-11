@@ -10,11 +10,13 @@ from PySide6.QtWidgets import (QColorDialog, QFileDialog, QGraphicsItem, QGraphi
                                QSplitter, QToolButton, QVBoxLayout, QWidget)
 
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QComboBox, QDockWidget, QHBoxLayout, QLineEdit
+from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QSpinBox)
 
 from ..config import APP_NAME
 from ..slide import library
-from ..slide.model import Element, Presentation, Slide, export_pptx
+from ..slide.model import Element, Presentation, Slide, export_pptx, static_slides
+from ..slide.quiz import KINDS, export_html, make_quiz_slide
 from ..slide.themes import LAYOUTS, THEMES, apply_theme, lib_element, make_slide, new_presentation
 from .banner import Banner
 from .logo import app_icon
@@ -103,7 +105,7 @@ def export_pdf(pres: Presentation, path: Path) -> None:
     p = QPainter(w)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     k = w.width() / W
-    for i, s in enumerate(pres.slides):
+    for i, s in enumerate(static_slides(pres)):
         if i:
             w.newPage()
         p.save()
@@ -133,7 +135,11 @@ class ElemItem(QGraphicsRectItem):
             p.drawRect(self.rect())
             p.setBrush(QColor("#d08a12"))
             p.drawRect(QRectF(self.rect().right() - HANDLE, self.rect().bottom() - HANDLE, HANDLE, HANDLE))
-        elif self.e.kind == "text" and not self.e.text:
+        if self.e.reveal:                                       # позначка «за кліком»
+            p.setPen(QColor("#d08a12"))
+            p.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            p.drawText(self.rect().adjusted(0, -18, 0, 0), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, "за кліком")
+        if not self.isSelected() and self.e.kind == "text" and not self.e.text:
             p.setPen(QColor("#b9c4c0"))
             p.drawRect(self.rect())
 
@@ -286,6 +292,7 @@ class SlideWindow(QMainWindow):
         f.addSeparator()
         f.addAction("Експорт у PPTX…", lambda: self.save_as("pptx"))
         f.addAction("Експорт у PDF…", lambda: self.save_as("pdf"))
+        f.addAction("HTML-квіз для учнів…", lambda: self.save_as("html"))
         sl = rb.tab("Слайди")
         g = sl.group("Новий")
         g.big("Титул", "new", lambda: self.add_layout("Титул"))
@@ -316,6 +323,21 @@ class SlideWindow(QMainWindow):
         g.big("Зображення", "image", self.add_image)
         g.big("Бібліотека", "book", lambda: self.lib_dock.setVisible(not self.lib_dock.isVisible()),
               tip="Шкільні векторні об'єкти за темами: подвійний клік — на слайд")
+        qz = rb.tab("Квіз")
+        g = qz.group("Нове питання")
+        for k, (title, ic) in {"choice": ("Вибір", "list-ol"), "truefalse": ("Правда чи ні", "check"),
+                               "input": ("Вписати", "edit"), "order": ("Упорядкувати", "sort-down"),
+                               "match": ("Пари", "merge")}.items():
+            g.big(title, ic, lambda k=k: self.quiz_dialog(k))
+        g = qz.group("Відповідь")
+        g.big("За кліком", "eye", self.toggle_reveal,
+              tip="Виділений елемент з'являється в показі лише за кліком (відповідь, підказка)")
+        g = qz.group("Для учнів")
+        g.big("HTML-квіз", "file-import", lambda: self.save_as("html"),
+              tip="Один файл із питаннями квізу: учень відкриває в браузері, без інтернету")
+        g = qz.group("Показ")
+        g.big("З початку", "eye", lambda: self.slideshow(0), key="F5")
+        g.big("З цього", "arrow-right", lambda: self.slideshow(self.cur), key="Shift+F5")
         dz = rb.tab("Дизайн")
         g = dz.group("Тема")
         for name in THEMES:
@@ -351,6 +373,25 @@ class SlideWindow(QMainWindow):
         self.refresh()
         self.fill_library()
         self.setWindowModified(True)
+
+    # ---------- квіз і показ ----------
+    def quiz_dialog(self, kind: str) -> None:
+        d = QuizDialog(self, kind)
+        if d.exec():
+            q = d.quiz()
+            if q:
+                self.add_slide(make_quiz_slide(self.pres, q))
+
+    def toggle_reveal(self) -> None:
+        for it in self.selected():
+            it.e.reveal = not it.e.reveal
+            it.update()
+        self.changed()
+
+    def slideshow(self, start: int = 0):
+        from .slide_show import start_show
+        self._show = start_show(self.pres, start)
+        return self._show
 
     # ---------- стан ----------
     def slide(self) -> Slide:
@@ -523,6 +564,10 @@ class SlideWindow(QMainWindow):
                 export_pptx(self.pres, path, raster=svg_png)
             elif suf == ".pdf":
                 export_pdf(self.pres, path)
+            elif suf in (".html", ".htm"):
+                if not export_html(self.pres, path):
+                    QMessageBox.information(self, INTERSLIDE, "У презентації немає слайдів-квізів (вкладка «Квіз»).")
+                    return False
             else:
                 self.pres.save(path)
                 self.path = path
@@ -538,7 +583,57 @@ class SlideWindow(QMainWindow):
         self.save_to(self.path) if self.path else self.save_as()
 
     def save_as(self, kind: str = "islide") -> None:
-        flt = {"islide": "Презентація InterSlide (*.islide)", "pptx": "Презентація PPTX (*.pptx)", "pdf": "PDF (*.pdf)"}[kind]
+        flt = {"islide": "Презентація InterSlide (*.islide)", "pptx": "Презентація PPTX (*.pptx)", "pdf": "PDF (*.pdf)",
+               "html": "HTML-квіз (*.html)"}[kind]
         p = QFileDialog.getSaveFileName(self, "Зберегти", f"презентація.{kind}", flt)[0]
         if p:
             self.save_to(Path(p))
+
+
+class QuizDialog(QDialog):
+    HINTS = {"choice": "Варіанти — кожен з нового рядка; правильні позначте * на початку. Напр.: *Київ",
+             "truefalse": "Правильна відповідь:",
+             "input": "Перший рядок — правильне слово; далі слова-підказки для плиток (необов'язково).",
+             "order": "Елементи в ПРАВИЛЬНОМУ порядку, кожен з нового рядка (у слайді перемішаються).",
+             "match": "Пари через «=», кожна з нового рядка. Напр.: Київ = Україна"}
+
+    def __init__(self, parent, kind: str) -> None:
+        super().__init__(parent)
+        self.kind = kind
+        self.setWindowTitle(f"Квіз · {KINDS[kind]}")
+        self.q = QLineEdit()
+        self.q.setPlaceholderText("Текст запитання")
+        self.opts = QPlainTextEdit()
+        self.tf = QComboBox()
+        self.tf.addItems(["Правда", "Неправда"])
+        self.pts = QSpinBox(minimum=1, maximum=12, value=1)
+        lay = QFormLayout(self)
+        lay.addRow("Запитання:", self.q)
+        lay.addRow(QLabel(self.HINTS[kind]))
+        lay.addRow(self.tf if kind == "truefalse" else self.opts)
+        lay.addRow("Бали:", self.pts)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+        self.resize(520, 360)
+
+    def quiz(self) -> dict | None:
+        lines = [x.strip() for x in self.opts.toPlainText().splitlines() if x.strip()]
+        q = {"kind": self.kind, "question": self.q.text().strip() or "Питання", "points": self.pts.value()}
+        if self.kind == "truefalse":
+            q["answer"] = [self.tf.currentIndex()]
+        elif self.kind == "choice":
+            q["options"] = [x.lstrip("*").strip() for x in lines]
+            q["answer"] = [i for i, x in enumerate(lines) if x.startswith("*")] or [0]
+        elif self.kind == "input":
+            if not lines:
+                return None
+            q["answer"], q["options"] = lines[0], lines[1:]
+        elif self.kind == "order":
+            q["options"] = lines
+        else:
+            q["options"] = [[a.strip(), b.strip()] for a, b in (x.split("=", 1) for x in lines if "=" in x)]
+        if self.kind in ("choice", "order", "match") and len(q["options"]) < 2:
+            return None
+        return q

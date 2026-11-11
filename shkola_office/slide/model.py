@@ -30,6 +30,7 @@ class Element:
     media: str = ""                    # ім'я файлу в media/ для image
     font: str = ""                     # "" — шрифт теми
     role: str = ""                     # title | body | accent | decor — тема перефарбовує за роллю
+    reveal: bool = False               # у показі з'являється за кліком (відповідь, підказка)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Element":
@@ -42,11 +43,12 @@ class Slide:
     bg: str = "#ffffff"
     notes: str = ""
     layout: str = ""
+    quiz: dict = field(default_factory=dict)   # {"kind", "question", "options", "answer", "points"} — див. quiz.py
 
     @classmethod
     def from_dict(cls, d: dict) -> "Slide":
         return cls([Element.from_dict(e) for e in d.get("elements", [])], d.get("bg", "#ffffff"),
-                   d.get("notes", ""), d.get("layout", ""))
+                   d.get("notes", ""), d.get("layout", ""), d.get("quiz") or {})
 
 
 @dataclass
@@ -73,7 +75,7 @@ class Presentation:
     # ---------- .islide ----------
     def to_json(self) -> dict:
         return {"format": "islide", "version": FORMAT_VERSION, "ratio": self.ratio, "title": self.title,
-                "font": self.font, "theme": self.theme, "slides": [{"bg": s.bg, "notes": s.notes, "layout": s.layout,
+                "font": self.font, "theme": self.theme, "slides": [{"bg": s.bg, "notes": s.notes, "layout": s.layout, "quiz": s.quiz,
                                                "elements": [asdict(e) for e in s.elements]} for s in self.slides]}
 
     def save(self, path: Path) -> None:
@@ -107,6 +109,16 @@ def content_slide(title: str = "Заголовок", body: str = "• Перши
                   Element("text", 50, 115, W - 100, H - 160, body, 22)], layout="Заголовок і текст")
 
 
+def static_slides(pres: Presentation) -> list[Slide]:
+    """Для PPTX/PDF/друку: слайд із прихованими відповідями → два слайди (питання, потім із відповіддю)."""
+    out = []
+    for s in pres.slides:
+        if any(e.reveal for e in s.elements):
+            out.append(Slide([e for e in s.elements if not e.reveal], s.bg, s.notes, s.layout))
+        out.append(s)
+    return out
+
+
 # ---------- PPTX ----------
 _PPTX_SHAPES = {"Прямокутник": "RECTANGLE", "Скруглений прямокутник": "ROUNDED_RECTANGLE", "Еліпс": "OVAL",
                 "Трикутник": "ISOSCELES_TRIANGLE", "Ромб": "DIAMOND", "Стрілка →": "RIGHT_ARROW",
@@ -132,7 +144,7 @@ def export_pptx(pres: Presentation, path: Path, raster=None) -> None:
     pp.slide_width, pp.slide_height = Pt(W), Pt(H)
     blank = pp.slide_layouts[6]
     al = {"left": PP_ALIGN.LEFT, "center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}
-    for s in pres.slides:
+    for s in static_slides(pres):
         sl = pp.slides.add_slide(blank)
         sl.background.fill.solid()
         sl.background.fill.fore_color.rgb = _rgb(s.bg or "#ffffff")
