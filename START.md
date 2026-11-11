@@ -18,5 +18,7 @@
 ## Далі
 - Підключити в Сканер ШКОЛА (перехідники), потім Накази ШКОЛА — лише на «так» користувача.
 - **InterSlide** — редактор презентацій для шкіл (задум 08.11, деталі в `docs/INTERSLIDE.md`).
+- **InterData** — навчальна база даних (`shkola_office/data/`, концепція в `docs/INTERDATA.md`), після InterSlide. Пауза: не починати без команди користувача.
+- InterSlide на паузі (11.11): чекаємо версію з Mac; чернетка `shkola_office/slide/model.py` не закомічена.
 - **Офіс ШКОЛА окремим застосунком для macOS і Linux** (побажання 08.11): той самий код (PySide6 кросплатформний); збірка .app/.dmg на Mac (черга Mac), AppImage/Flatpak для Linux; перевірити шрифти (Times New Roman → Liberation Serif/Tinos), шляхи даних (~/Library, ~/.local/share), друк через CUPS.
 - Репозиторій на GitHub (відкритий) — після «так».
