@@ -192,6 +192,7 @@ class Canvas(QGraphicsView):
 
 class SlideWindow(QMainWindow):
     saved = Signal(str)
+    OWN_EXT, KIND = ".islide", "slide"
 
     def __init__(self, parent=None, pres: Presentation | None = None) -> None:
         super().__init__(parent)
@@ -231,6 +232,25 @@ class SlideWindow(QMainWindow):
         self.setMenuWidget(top)
         self._library()
         self.refresh(0)
+        from .autosave import AutoSave
+        self.autosave = AutoSave(self)
+
+    # ---------- для автозбереження ----------
+    def is_dirty(self) -> bool:
+        return self.isWindowModified()
+
+    def mark_clean(self) -> None:
+        self.setWindowModified(False)
+
+    def write_own(self, path: Path) -> None:
+        self.pres.save(Path(path))
+
+    def closeEvent(self, e) -> None:
+        if self.isWindowModified() and QMessageBox.question(self, INTERSLIDE, "Є незбережені зміни. Закрити?") != QMessageBox.StandardButton.Yes:
+            e.ignore()
+            return
+        self.autosave.discard()
+        e.accept()
 
     # ---------- бібліотека ----------
     def _library(self) -> None:
@@ -455,11 +475,13 @@ class SlideWindow(QMainWindow):
 
     def _notes(self) -> None:
         self.slide().notes = self.notes.toPlainText()
+        self.setWindowModified(True)
 
     # ---------- слайди ----------
     def add_slide(self, s: Slide) -> None:
         self.pres.slides.insert(self.cur + 1, s)
         self.refresh(self.cur + 1)
+        self.setWindowModified(True)
 
     def dup_slide(self) -> None:
         self.add_slide(Slide.from_dict(self.pres.to_json()["slides"][self.cur]))
@@ -468,6 +490,7 @@ class SlideWindow(QMainWindow):
         if len(self.pres.slides) > 1:
             del self.pres.slides[self.cur]
             self.refresh(self.cur - 1 if self.cur else 0)
+            self.setWindowModified(True)
 
     def move_slide(self, d: int) -> None:
         j = self.cur + d
@@ -475,6 +498,7 @@ class SlideWindow(QMainWindow):
             s = self.pres.slides
             s[self.cur], s[j] = s[j], s[self.cur]
             self.refresh(j)
+            self.setWindowModified(True)
 
     def set_ratio(self, ratio: str) -> None:
         (ow, _), self.pres.ratio = self.pres.size, ratio
@@ -484,6 +508,7 @@ class SlideWindow(QMainWindow):
                 e.x, e.w = e.x * k, e.w * k
         apply_theme(self.pres, self.pres.theme)
         self.refresh()
+        self.setWindowModified(True)
 
     def slide_bg(self) -> None:
         c = QColorDialog.getColor(QColor(self.slide().bg), self, "Тло слайда")
@@ -580,6 +605,8 @@ class SlideWindow(QMainWindow):
             suf = path.suffix.lower()
             if suf == ".pptx":
                 export_pptx(self.pres, path, raster=svg_png)
+                self.path = path
+                self.setWindowModified(False)
             elif suf == ".pdf":
                 export_pdf(self.pres, path)
             elif suf in (".html", ".htm"):

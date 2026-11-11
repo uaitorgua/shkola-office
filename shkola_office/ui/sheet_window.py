@@ -34,6 +34,8 @@ SHEET_ICONS = {
 
 
 class SheetWindow(QMainWindow):
+    OWN_EXT, KIND = ".itab", "tab"
+
     def __init__(self, parent=None, sheets: dict[str, list[list[str]]] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{INTERTAB} · {APP_NAME}")
@@ -70,7 +72,31 @@ class SheetWindow(QMainWindow):
         self.tabs.currentChanged.connect(lambda _i: self._sync_formula())
         for name, rows in (sheets or {"Аркуш1": []}).items():
             self.add_sheet(name, rows)
+        self._dirty = False
+        from .autosave import AutoSave
+        self.autosave = AutoSave(self)
         self.statusBar().showMessage("Готово")
+
+    # ---------- для автозбереження ----------
+    def is_dirty(self) -> bool:
+        return self._dirty
+
+    def mark_clean(self) -> None:
+        self._dirty = False
+
+    def _touch(self, *_):
+        self._dirty = True
+
+    def write_own(self, path: Path) -> None:
+        from .ownfmt import write_itab
+        write_itab(self, Path(path))
+
+    def closeEvent(self, e) -> None:
+        if self._dirty and QMessageBox.question(self, "Закрити", "Є незбережені зміни. Закрити таблиці?") != QMessageBox.StandardButton.Yes:
+            e.ignore()
+            return
+        self.autosave.discard()
+        e.accept()
 
     # ---------- інтерфейс ----------
     def _act(self, tb, text, slot, key=None, tip=None):
@@ -313,6 +339,7 @@ class SheetWindow(QMainWindow):
     def add_sheet(self, name: str, rows: list[list[str]], fmts: dict | None = None) -> Sheet:
         s = Sheet()
         s.set_data(rows, fmts)
+        s.itemChanged.connect(self._touch)
         s.currentCellChanged.connect(lambda *_: self._sync_formula())
         s.itemSelectionChanged.connect(self._sync_formula)
         self.tabs.addTab(s, name)
@@ -456,12 +483,18 @@ class SheetWindow(QMainWindow):
 
     # ---------- файли ----------
     def open_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Відкрити таблицю", "", "Таблиці (*.xlsx *.csv);;Усі файли (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Відкрити таблицю", "", "Таблиці (*.xlsx *.itab *.csv);;Усі файли (*)")
         if path:
             self.load(Path(path))
 
     def load(self, path: Path) -> None:
         try:
+            if path.suffix.lower() == ".itab":
+                from .ownfmt import read_itab
+                read_itab(self, path)
+                self.path, self._dirty = path, False
+                self.setWindowTitle(f"{path.name} — {INTERTAB} · {APP_NAME}")
+                return
             if path.suffix.lower() == ".csv":
                 text = path.read_text(encoding="utf-8-sig", errors="replace")
                 dialect = csv.Sniffer().sniff(text[:2000], delimiters=";,\t") if text.strip() else csv.excel
@@ -483,20 +516,25 @@ class SheetWindow(QMainWindow):
         self.setWindowTitle(f"{path.name} — {INTERTAB} · {APP_NAME}")
 
     def save(self) -> None:
-        if self.path and self.path.suffix.lower() == ".xlsx":
+        if self.path and self.path.suffix.lower() in (".xlsx", ".itab"):
             self.save_to(self.path)
         else:
             self.save_as()
 
     def save_as(self) -> None:
         start = str(self.path.with_suffix(".xlsx")) if self.path else "таблиця.xlsx"
-        path, _ = QFileDialog.getSaveFileName(self, "Зберегти як", start, "Таблиця XLSX (*.xlsx)")
+        path, _ = QFileDialog.getSaveFileName(self, "Зберегти як", start, "Таблиця XLSX (*.xlsx);;Таблиця InterTab (*.itab)")
         if path:
             self.save_to(Path(path))
 
     def save_to(self, path: Path) -> Path | None:
         from ..export.xlsx_io import save_sheets_xlsx
         try:
+            if path.suffix.lower() == ".itab":
+                self.write_own(path)
+                self.path, self._dirty = path, False
+                self.statusBar().showMessage(f"Збережено: {path}")
+                return path
             sheets = {}
             for i in range(self.tabs.count()):
                 w: Sheet = self.tabs.widget(i)
@@ -506,6 +544,7 @@ class SheetWindow(QMainWindow):
             QMessageBox.critical(self, "Зберегти", f"Не вдалося зберегти:\n{e}")
             return None
         self.path = path
+        self._dirty = False
         self.statusBar().showMessage(f"Збережено: {path}")
         return path
 

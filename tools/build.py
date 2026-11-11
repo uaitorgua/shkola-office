@@ -14,7 +14,7 @@ args = {a.lower() for a in sys.argv[1:]}
 EXE = ROOT / "dist" / "OfisShkola.exe"
 SIGN = Path(os.environ.get("SHKOLA_SIGN_PS1") or ROOT.parent / "Сканер-ШКОЛА" / "tools" / "sign.ps1")
 TESTS = ["test_editors", "test_doc_pages", "test_sheet_extra", "test_interslide", "test_slide_themes",
-         "test_slide_library", "test_slide_quiz", "test_slide_scenarios", "test_interdata_core", "test_interdata_ui"]
+         "test_slide_library", "test_slide_quiz", "test_slide_scenarios", "test_interdata_core", "test_interdata_ui", "test_ownfmt_autosave"]
 
 
 def run(title: str, cmd: list[str]) -> None:

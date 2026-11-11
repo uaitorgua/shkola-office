@@ -105,6 +105,8 @@ class PageEdit(QTextEdit):
 
 
 class EditorWindow(QMainWindow):
+    OWN_EXT, KIND = ".itext", "text"
+
     def __init__(self, parent=None, html: str = "", title: str = "Документ") -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{title} — {INTERTEXT} · {APP_NAME}")
@@ -143,6 +145,8 @@ class EditorWindow(QMainWindow):
         cl.addWidget(self.scroll, 1)
         self.setCentralWidget(central)
         self.hf = HeaderFooter()
+        from .autosave import AutoSave
+        self.autosave = AutoSave(self)
         self._ribbon()
         self._menu()
         self.ribbon.finish(self.menuBar())
@@ -175,6 +179,17 @@ class EditorWindow(QMainWindow):
 
     def html(self) -> str:
         return self.edit.toHtml()
+
+    # ---------- для автозбереження ----------
+    def is_dirty(self) -> bool:
+        return self.edit.document().isModified()
+
+    def mark_clean(self) -> None:
+        self.edit.document().setModified(False)
+
+    def write_own(self, path: Path) -> None:
+        from .ownfmt import write_itext
+        write_itext(self, Path(path))
 
     def _sync_ruler(self) -> None:
         if not hasattr(self, "ruler"):
@@ -409,6 +424,7 @@ class EditorWindow(QMainWindow):
         m.addAction(self._act("Відкрити… (DOCX, HTML, TXT)", self.open_file, "Ctrl+O"))
         m.addAction(self._act("Зберегти", self.save, "Ctrl+S"))
         m.addAction(self._act("Зберегти як DOCX…", lambda: self.save_as("docx"), "Ctrl+Shift+S"))
+        m.addAction(self._act("Зберегти як InterText (.itext)…", lambda: self.save_as("itext")))
         m.addAction(self._act("Зберегти як PDF…", lambda: self.save_as("pdf")))
         m.addAction(self._act("Зберегти як HTML…", lambda: self.save_as("html")))
         m.addAction(self._act("Зберегти як TXT…", lambda: self.save_as("txt")))
@@ -892,14 +908,17 @@ class EditorWindow(QMainWindow):
 
     def open_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Відкрити документ", "",
-                                              "Документи (*.docx *.html *.htm *.txt);;Усі файли (*)")
+                                              "Документи (*.docx *.itext *.html *.htm *.txt);;Усі файли (*)")
         if path:
             self.load(Path(path))
 
     def load(self, path: Path) -> None:
         ext = path.suffix.lower()
         try:
-            if ext == ".docx":
+            if ext == ".itext":
+                from .ownfmt import read_itext
+                read_itext(self, path)
+            elif ext == ".docx":
                 from ..export.html_docx import docx_to_html
                 html, images = docx_to_html(path, with_images=True)
                 margins = images.pop("__margins_mm__", None)
@@ -923,13 +942,13 @@ class EditorWindow(QMainWindow):
         self.statusBar().showMessage(f"Відкрито: {path}")
 
     def save(self) -> None:
-        if self.path and self.path.suffix.lower() in (".docx", ".html", ".htm", ".txt"):
+        if self.path and self.path.suffix.lower() in (".docx", ".itext", ".html", ".htm", ".txt"):
             self.save_to(self.path)
         else:
             self.save_as("docx")
 
     def save_as(self, fmt: str) -> None:
-        filters = {"docx": "Документ DOCX (*.docx)", "pdf": "PDF (*.pdf)", "html": "HTML (*.html)", "txt": "Текст (*.txt)"}
+        filters = {"itext": "Документ InterText (*.itext)", "docx": "Документ DOCX (*.docx)", "pdf": "PDF (*.pdf)", "html": "HTML (*.html)", "txt": "Текст (*.txt)"}
         start = str(self.path.with_suffix("." + fmt)) if self.path else f"документ.{fmt}"
         path, _ = QFileDialog.getSaveFileName(self, "Зберегти як", start, filters[fmt])
         if path:
@@ -959,7 +978,9 @@ class EditorWindow(QMainWindow):
     def save_to(self, path: Path) -> Path | None:
         ext = path.suffix.lower()
         try:
-            if ext == ".docx":
+            if ext == ".itext":
+                self.write_own(path)
+            elif ext == ".docx":
                 from ..export.html_docx import html_to_docx
                 path.parent.mkdir(parents=True, exist_ok=True)
                 st = self.edit.setup
@@ -1009,4 +1030,5 @@ class EditorWindow(QMainWindow):
                 self, "Закрити", "Є незбережені зміни. Закрити редактор?") != QMessageBox.StandardButton.Yes:
             e.ignore()
             return
+        self.autosave.discard()
         e.accept()

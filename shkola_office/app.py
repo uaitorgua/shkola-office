@@ -16,13 +16,13 @@ from .ui.banner import Banner
 from .ui.logo import app_icon
 
 EDITORS = {  # ключ: (назва, підпис, іконка, розширення)
-    "text": ("InterText", "Документи: накази, листи, плани\nDOCX · PDF · друк", "file-lines", (".docx", ".html", ".htm", ".txt")),
-    "tab": ("InterTab", "Таблиці: журнали, табелі, розклад\nXLSX · CSV · формули", "table", (".xlsx", ".csv")),
+    "text": ("InterText", "Документи: накази, листи, плани\nDOCX · PDF · друк", "file-lines", (".docx", ".itext", ".html", ".htm", ".txt")),
+    "tab": ("InterTab", "Таблиці: журнали, табелі, розклад\nXLSX · CSV · формули", "table", (".xlsx", ".itab", ".csv")),
     "slide": ("InterSlide", "Презентації, уроки й квізи\nPPTX · PDF · HTML-квіз", "image", (".islide",)),
     "data": ("InterData", "База даних: таблиці, запити,\nформи, звіти · SQLite", "sheet", (".idata", ".db", ".sqlite")),
 }
 RECENT = config.DATA_DIR / "recent.json"
-FILTER = "Файли Офісу ШКОЛА (*.docx *.html *.htm *.txt *.xlsx *.csv *.islide *.idata *.db *.sqlite);;Усі файли (*)"
+FILTER = "Файли Офісу ШКОЛА (*.docx *.itext *.html *.htm *.txt *.xlsx *.itab *.csv *.islide *.idata *.db *.sqlite);;Усі файли (*)"
 
 
 def kind_of(path: Path) -> str | None:
@@ -93,6 +93,30 @@ class StartWindow(QMainWindow):
             QLabel{color:#5b6b67;font-size:13px;margin-top:8px}""")
         self.fill_recent()
 
+    def offer_restore(self, ask=None) -> int:
+        """Після збою: незбережені документи з автозбереження — відновити чи забути."""
+        from .ui import autosave
+        n = 0
+        for item in autosave.pending():
+            when = __import__("time").strftime("%d.%m %H:%M", __import__("time").localtime(item["time"]))
+            name = Path(item["path"]).name if item["path"] else "новий документ"
+            q = f"Знайдено незбережену роботу: {name} ({EDITORS[item['kind']][0]}, {when}). Відновити?"
+            yes = ask(q) if ask else QMessageBox.question(self, config.APP_NAME, q) == QMessageBox.StandardButton.Yes
+            if yes:
+                w = self._make(item["kind"])
+                w.load(item["backup"])
+                w.path = Path(item["path"]) if item["path"] else None
+                if hasattr(w, "_touch"):
+                    w._touch()
+                elif hasattr(w, "edit"):
+                    w.edit.document().setModified(True)
+                else:
+                    w.setWindowModified(True)
+                w.show()
+                n += 1
+            autosave.forget(item)
+        return n
+
     def fill_recent(self) -> None:
         self.recent.clear()
         for p in _recent():
@@ -160,4 +184,6 @@ def main(argv: list[str] | None = None) -> int:
         start.open_editor(flag)
     else:
         start.show()
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(400, start.offer_restore)
     return app.exec()
