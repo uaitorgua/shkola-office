@@ -104,3 +104,13 @@ s.grab().save(str(D / "ofis_start.png"))
 dw = s.open_path(D / "j.idata")
 assert type(dw).__name__ == "DataWindow" and dw.db.tables()
 print("INTERDATA ВІКНО OK", D)
+w2 = DataWindow()
+from shkola_office.data.db import Database  # noqa: E402
+nd = Database(D / "n2.idata")
+nd.import_rows("Учні", ["Прізвище", "Клас", "Керівник"],
+               [[f"У{i}", ["5-А", "5-Б"][i % 2], ["Іваненко", "Петренко"][i % 2]] for i in range(10)])
+nd.close()
+w2.load(D / "n2.idata")
+w2.open_table("Учні")
+assert w2.normalize(ask=lambda q: "Винести" in q) == 1 and "Класи" in w2.db.tables()
+print("НОРМАЛІЗАЦІЯ У ВІКНІ OK")

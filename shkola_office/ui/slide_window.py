@@ -28,6 +28,20 @@ INTERSLIDE = "InterSlide"
 HANDLE = 10
 
 
+# Шрифти тем — віндовські; на macOS/Linux підставляються близькі (порядок = пріоритет).
+FALLBACK = {
+    "Segoe UI": ["Segoe UI", "Helvetica Neue", "Noto Sans", "DejaVu Sans", "Arial"],
+    "Segoe UI Semibold": ["Segoe UI Semibold", "Helvetica Neue", "Noto Sans", "DejaVu Sans", "Arial"],
+    "Segoe UI Black": ["Segoe UI Black", "Arial Black", "Noto Sans", "DejaVu Sans"],
+    "Segoe Print": ["Segoe Print", "Chalkboard SE", "Comic Neue", "Comic Sans MS", "Noto Sans"],
+    "Georgia": ["Georgia", "Noto Serif", "DejaVu Serif", "Times New Roman"],
+}
+
+
+def font_families(name: str) -> list[str]:
+    return FALLBACK.get(name, [name, "Noto Sans", "DejaVu Sans", "Arial"])
+
+
 def paint_element(p: QPainter, e: Element, pres: Presentation, r: QRectF | None = None) -> None:
     r = r or QRectF(e.x, e.y, e.w, e.h)
     if e.kind == "image" and e.media.lower().endswith(".svg"):
@@ -45,7 +59,8 @@ def paint_element(p: QPainter, e: Element, pres: Presentation, r: QRectF | None 
     elif e.fill:
         p.fillRect(r, QColor(e.fill))
     if e.text:
-        f = QFont(e.font or pres.font)
+        f = QFont()
+        f.setFamilies(font_families(e.font or pres.font))
         f.setPixelSize(max(1, int(e.size)))
         f.setBold(e.bold)
         f.setItalic(e.italic)

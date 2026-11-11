@@ -426,6 +426,75 @@ class Database:
                 self.con.execute("DELETE FROM _id_history WHERE n=?", (h["n"],))
         return f"Повернуто: {last['action']} у «{last['tbl']}»"
 
+    # ---------- нормалізація (навчальний помічник) ----------
+    def normalize_hints(self, tbl: str) -> list[dict]:
+        """Повтори, які варто винести в окрему таблицю. Групує поля, що завжди змінюються разом
+        (напр. «Клас» і «Керівник»): {cols, distinct, rows, why}."""
+        fs = [f for f in self.fields(tbl) if f.type in ("text", "choice")]
+        n = self.con.execute(f"SELECT COUNT(*) FROM {q(tbl)}").fetchone()[0]
+        if n < 6:
+            return []
+        cand = []
+        for f in fs:
+            d = self.con.execute(f"SELECT COUNT(DISTINCT {q(f.name)}) FROM {q(tbl)} WHERE {q(f.name)} IS NOT NULL").fetchone()[0]
+            if 1 < d <= n / 3:
+                cand.append((f.name, d))
+        used, out = set(), []
+        for name, d in cand:
+            if name in used:
+                continue
+            group = [name]
+            for other, d2 in cand:              # інше поле однозначно визначається цим (функціональна залежність)
+                if other == name or other in used:
+                    continue
+                k = self.con.execute(f"SELECT COUNT(*) FROM (SELECT {q(name)} FROM {q(tbl)} GROUP BY {q(name)} "
+                                     f"HAVING COUNT(DISTINCT {q(other)}) > 1)").fetchone()[0]
+                if k == 0 and d2 <= d:
+                    group.append(other)
+            used.update(group)
+            why = (f"«{name}» має лише {d} різних значень на {n} записів" +
+                   (f", а {', '.join('«' + g + '»' for g in group[1:])} завжди повторюються разом із ним" if len(group) > 1 else "") +
+                   ". Окрема таблиця прибере повтори: зміна в одному місці — видно всюди (крок до 2НФ/3НФ).")
+            out.append({"cols": group, "distinct": d, "rows": n, "why": why})
+        return out
+
+    def extract_table(self, tbl: str, cols: list[str], new_name: str) -> int:
+        """Винести поля cols у нову таблицю new_name (унікальні комбінації), а в tbl лишити посилання.
+        Повертає кількість записів нової таблиці."""
+        new_name = check_name(new_name, "Назва таблиці")
+        old = {f.name: f for f in self.fields(tbl)}
+        if any(c not in old for c in cols):
+            raise DataError("Таких полів немає.")
+        if new_name in self.tables():
+            raise DataError(f"Таблиця «{new_name}» уже є.")
+        link_name = cols[0]
+        nf = [Field(c, "text" if old[c].type == "choice" else old[c].type, required=(i == 0), unique=(i == 0)) for i, c in enumerate(cols)]
+        self.create_table(new_name, nf)
+        combos = self.con.execute(f"SELECT DISTINCT {', '.join(map(q, cols))} FROM {q(tbl)} WHERE {q(cols[0])} IS NOT NULL").fetchall()
+        ids = {}
+        with self.con:
+            for c in combos:
+                cur = self.con.execute(f"INSERT INTO {q(new_name)} ({', '.join(map(q, cols))}) VALUES ({', '.join('?' * len(cols))})", tuple(c))
+                ids[c[0]] = cur.lastrowid
+            tmp = "_id_link_tmp"
+            self.con.execute(f"ALTER TABLE {q(tbl)} ADD COLUMN {q(tmp)} INTEGER REFERENCES {q(new_name)}(id)")
+            for val, rid in ids.items():
+                self.con.execute(f"UPDATE {q(tbl)} SET {q(tmp)}=? WHERE {q(link_name)}=?", (rid, val))
+            for t_ in self.tables():
+                self.con.execute(f"DROP VIEW IF EXISTS {q('_id_v_' + t_)}")
+            for c in cols:
+                self.con.execute(f"ALTER TABLE {q(tbl)} DROP COLUMN {q(c)}")
+            self.con.execute(f"ALTER TABLE {q(tbl)} RENAME COLUMN {q(tmp)} TO {q(link_name)}")
+            spec = [f for f in self.fields(tbl) if f.name not in cols]
+            pos = list(old).index(link_name)
+            spec.insert(min(pos, len(spec)), Field(link_name, "link", link=new_name))
+            self.con.execute("DELETE FROM _id_fields WHERE tbl=?", (tbl,))
+            for i, f in enumerate(spec):
+                self.con.execute("INSERT INTO _id_fields VALUES(?,?,?,?)", (tbl, f.name, i, json.dumps(asdict(f), ensure_ascii=False)))
+        for t_ in self.tables():
+            self._refresh_view(t_)
+        return len(ids)
+
     # ---------- імпорт / експорт ----------
     def import_rows(self, name: str, header: list[str], rows: list[list]) -> list[tuple[str, str, str]]:
         """Нова таблиця з автотипами. Повертає [(поле, тип, пояснення)]."""

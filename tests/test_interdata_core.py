@@ -128,3 +128,17 @@ assert set(got) == {"Учні", "Предмети", "Оцінки"} and len(imp2
 o = Database.open_sqlite(D / "journal.idata", D / "copy.idata")
 assert len(o.rows("Оцінки")) == 40
 print("INTERDATA ЯДРО OK", D)
+
+# нормалізація: «Клас» і «Керівник» повторюються разом → окрема таблиця
+n = Database(D / "norm.idata")
+n.import_rows("Учні", ["Прізвище", "Клас", "Керівник"],
+              [[f"У{i}", ["5-А", "5-Б", "6-А"][i % 3], ["Іваненко", "Петренко", "Сидоренко"][i % 3]] for i in range(15)])
+h = n.normalize_hints("Учні")
+assert h and set(h[0]["cols"]) == {"Клас", "Керівник"} and "разом" in h[0]["why"], h
+before = {(r["Прізвище"], r["Клас"]) for r in n.rows("Учні")}
+assert n.extract_table("Учні", h[0]["cols"], "Класи") == 3
+assert [f.type for f in n.fields("Учні") if f.name == "Клас"] == ["link"] and "Керівник" not in [f.name for f in n.fields("Учні")]
+assert {(r["Прізвище"], r["Клас"]) for r in n.rows("Учні")} == before, "дані не загубились"
+n.update("Класи", n.find_by_label("Класи", "5-А"), {"Керівник": "Нова Н. Н."})
+assert len(n.rows("Класи")) == 3 and not n.normalize_hints("Учні")
+print("НОРМАЛІЗАЦІЯ OK")

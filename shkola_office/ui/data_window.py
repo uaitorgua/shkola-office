@@ -200,6 +200,8 @@ class DataWindow(QMainWindow):
         g = t.group("Поля")
         g.big("Нове поле", "layers", self.add_field)
         g.big("Змінити тип", "wand", self.change_type, tip="Змінити тип поля з перевіркою записів, що не підходять")
+        g = t.group("Навчання")
+        g.big("Нормалізація", "merge", self.normalize, tip="Знайти повтори й винести їх в окрему таблицю зі зв'язком")
         g = t.group("Пошук")
         self.find = QLineEdit()
         self.find.setPlaceholderText("Пошук у таблиці…")
@@ -655,6 +657,29 @@ class DataWindow(QMainWindow):
         self.db.change_type(self.cur_table, name, nt)
         self.open_table(self.cur_table)
         self.statusBar().showMessage(f"Тип поля «{name}»: {t}", 6000)
+
+    def normalize(self, ask=None) -> int:
+        """Помічник нормалізації: пояснює повтор і виносить поля в окрему таблицю (ask — для тестів)."""
+        if not self.cur_table:
+            return 0
+        hints = self.db.normalize_hints(self.cur_table)
+        if not hints:
+            self._err(f"У таблиці «{self.cur_table}» повторів, які варто винести, не знайдено.")
+            return 0
+        done = 0
+        for h in hints:
+            name = (h["cols"][0] + "и") if not h["cols"][0].endswith(("и", "і")) else h["cols"][0] + " (довідник)"
+            q = h["why"] + " Винести " + ", ".join(h["cols"]) + f" у нову таблицю «{name}»?"
+            if ask(q) if ask else QMessageBox.question(self, "Нормалізація", q) == QMessageBox.StandardButton.Yes:
+                try:
+                    n = self.db.extract_table(self.cur_table, h["cols"], name)
+                    done += 1
+                    self.statusBar().showMessage(f"Створено «{name}» ({n} записів), у «{self.cur_table}» тепер посилання", 8000)
+                except DataError as e:
+                    self._err(e)
+        self.refresh_nav()
+        self.open_table(self.cur_table)
+        return done
 
     # ---------- запити ----------
     def _q_fields(self, tbl: str) -> None:
