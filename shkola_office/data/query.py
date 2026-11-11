@@ -179,7 +179,15 @@ def report(db: Database, spec: dict) -> dict:
 
 
 def report_html(rep: dict) -> str:
-    e = lambda v: html.escape("" if v is None else (f"{v:g}" if isinstance(v, float) else str(v)))
+    def e(v):
+        if v is None:
+            return ""
+        if isinstance(v, float):
+            return html.escape(f"{v:g}".replace(".", ","))
+        s = str(v)
+        if len(s) == 10 and s[4] == "-" and s[7] == "-" and s[:4].isdigit():
+            s = f"{s[8:]}.{s[5:7]}.{s[:4]}"
+        return html.escape(s)
     cols = rep["columns"]
     head = "".join(f"<th>{e(c)}</th>" for c in cols)
     body = []

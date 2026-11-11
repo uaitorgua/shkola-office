@@ -19,9 +19,10 @@ EDITORS = {  # ключ: (назва, підпис, іконка, розшире
     "text": ("InterText", "Документи: накази, листи, плани\nDOCX · PDF · друк", "file-lines", (".docx", ".html", ".htm", ".txt")),
     "tab": ("InterTab", "Таблиці: журнали, табелі, розклад\nXLSX · CSV · формули", "table", (".xlsx", ".csv")),
     "slide": ("InterSlide", "Презентації, уроки й квізи\nPPTX · PDF · HTML-квіз", "image", (".islide",)),
+    "data": ("InterData", "База даних: таблиці, запити,\nформи, звіти · SQLite", "sheet", (".idata", ".db", ".sqlite")),
 }
 RECENT = config.DATA_DIR / "recent.json"
-FILTER = "Файли Офісу ШКОЛА (*.docx *.html *.htm *.txt *.xlsx *.csv *.islide);;Усі файли (*)"
+FILTER = "Файли Офісу ШКОЛА (*.docx *.html *.htm *.txt *.xlsx *.csv *.islide *.idata *.db *.sqlite);;Усі файли (*)"
 
 
 def kind_of(path: Path) -> str | None:
@@ -50,12 +51,12 @@ class StartWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{config.APP_NAME} {__version__}")
         self.setWindowIcon(app_icon())
-        self.resize(900, 600)
+        self.resize(900, 700)
         self.windows: list = []
         box = QWidget()
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 12)
-        lay.addWidget(Banner(config.APP_NAME, "ДОКУМЕНТИ · ТАБЛИЦІ · ПРЕЗЕНТАЦІЇ · ДЛЯ ШКОЛИ", compact=False))
+        lay.addWidget(Banner(config.APP_NAME, "ДОКУМЕНТИ · ТАБЛИЦІ · ПРЕЗЕНТАЦІЇ · БАЗИ ДАНИХ · ДЛЯ ШКОЛИ", compact=False))
         grid = QGridLayout()
         grid.setContentsMargins(24, 16, 24, 0)
         grid.setSpacing(16)
@@ -67,9 +68,9 @@ class StartWindow(QMainWindow):
                 b.setIcon(icons.icon(ic))
             b.setIconSize(QSize(48, 48))
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            b.setMinimumSize(250, 170)
+            b.setMinimumSize(380, 130)
             b.clicked.connect(lambda _=False, k=k: self.open_editor(k))
-            grid.addWidget(b, 0, i)
+            grid.addWidget(b, i // 2, i % 2)
         lay.addLayout(grid)
         bar = QWidget()
         bl = QVBoxLayout(bar)
@@ -107,9 +108,12 @@ class StartWindow(QMainWindow):
         elif k == "tab":
             from .ui.sheet_window import SheetWindow
             w = SheetWindow()
-        else:
+        elif k == "slide":
             from .ui.slide_window import SlideWindow
             w = SlideWindow()
+        else:
+            from .ui.data_window import DataWindow
+            w = DataWindow()
         if hasattr(w, "saved"):
             w.saved.connect(lambda p: (remember(p), self.fill_recent()))
         self.windows.append(w)
@@ -148,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyle("Fusion")
     start = StartWindow()
     files = [Path(a) for a in argv if not a.startswith("--")]
-    mode = {"--intertext": "text", "--intertab": "tab", "--interslide": "slide"}
+    mode = {"--intertext": "text", "--intertab": "tab", "--interslide": "slide", "--interdata": "data"}
     flag = next((mode[a] for a in argv if a in mode), None)
     if files:
         start.open_path(files[0])
