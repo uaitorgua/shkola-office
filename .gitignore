@@ -3,3 +3,6 @@ __pycache__/
 tests/out/
 *.pfx
 *.zip
+build/
+dist/
+*.spec
