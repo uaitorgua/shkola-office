@@ -271,6 +271,31 @@ class Database:
             self.con.execute("UPDATE _id_fields SET spec=? WHERE tbl=? AND name=?",
                              (json.dumps(asdict(nf), ensure_ascii=False), tbl, name))
 
+    def add_many_to_many(self, a: str, b: str, name: str | None = None, extra: list[Field] | None = None) -> str:
+        """Зв'язок «багато-до-багатьох» через проміжну таблицю (напр. Учні ↔ Гуртки → «Учні_Гуртки»)."""
+        name = name or f"{a}_{b}"
+        la, lb = a, b                                   # поле називається як таблиця, на яку посилається
+        self.create_table(name, [Field(la, "link", required=True, link=a), Field(lb, "link", required=True, link=b),
+                                 *(extra or [])])
+        with self.con:
+            self.con.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {q('_id_u_' + name)} ON {q(name)} ({q(la)}, {q(lb)})")
+        return name
+
+    def relations(self) -> list[dict]:
+        """Усі зв'язки з класифікацією за множинністю й обов'язковістю (термінологія програми МОН):
+        {from, field, to, kind: "1:1"|"1:N"|"N:M", required: bool, via}"""
+        out = []
+        for t in self.tables():
+            links = [f for f in self.fields(t) if f.type == "link"]
+            others = [f for f in self.fields(t) if f.type != "link"]
+            if len(links) == 2 and all(f.required for f in links) and len(others) <= 2:
+                out.append({"from": links[0].link, "to": links[1].link, "kind": "N:M", "required": False, "via": t,
+                            "field": ""})
+            for f in links:
+                out.append({"from": f.link, "field": f.name, "to": t, "kind": "1:1" if f.unique else "1:N",
+                            "required": f.required, "via": ""})
+        return out
+
     def links_to(self, tbl: str) -> list[tuple[str, str]]:
         """Хто посилається на таблицю: [(таблиця, поле)]."""
         return [(t, f.name) for t in self.tables() for f in self.fields(t) if f.type == "link" and f.link == tbl]
@@ -380,7 +405,9 @@ class Database:
             name = self.get(tbl, rid).get(lab, rid)
             what = "; ".join(f"{k.split('.')[0]}: {n}" for k, n in deps.items())
             raise HasDependents(f"«{name}» використовується ({what}). Очистити ці посилання, видалити разом чи скасувати?", deps)
-        self._batch = int(time.time() * 1000)
+        own = not self._batch                       # усередині запиту-дії — спільний крок історії
+        if own:
+            self._batch = int(time.time() * 1000)
         try:
             with self.con:
                 for key in deps:
@@ -394,7 +421,8 @@ class Database:
                             self._log(t, r["id"], "update", {f: rid}, {f: None})
                 self._delete_one(tbl, self.get(tbl, rid))
         finally:
-            self._batch = 0
+            if own:
+                self._batch = 0
 
     def _delete_one(self, tbl: str, row: dict) -> None:
         self.con.execute(f"DELETE FROM {q(tbl)} WHERE id=?", (row["id"],))

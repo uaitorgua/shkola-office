@@ -12,7 +12,7 @@ import re
 from .db import Database, DataError, q
 
 AGG = {"": "", "count": "Кількість", "sum": "Сума", "avg": "Середнє", "min": "Найменше", "max": "Найбільше"}
-OPS = ["=", "≠", ">", "<", "≥", "≤", "містить", "починається з", "порожнє", "не порожнє"]
+OPS = ["=", "≠", ">", "<", "≥", "≤", "містить", "не містить", "починається з", "не починається з", "порожнє", "не порожнє"]
 _SQLOP = {"=": "=", "≠": "<>", ">": ">", "<": "<", "≥": ">=", "≤": "<="}
 
 
@@ -63,13 +63,10 @@ class Query:
             if op == "не порожнє":
                 where.append(f"({expr} IS NOT NULL AND {expr} <> '')")
                 continue
-            if op == "містить":
-                where.append(f"{expr} LIKE ?")
-                self.params.append(f"%{v}%")
-                continue
-            if op == "починається з":
-                where.append(f"{expr} LIKE ?")
-                self.params.append(f"{v}%")
+            if op in ("містить", "не містить", "починається з", "не починається з"):
+                neg = op.startswith("не ")
+                where.append(f"({expr} {'NOT ' if neg else ''}LIKE ?" + (f" OR {expr} IS NULL)" if neg else ")"))
+                self.params.append(f"%{v}%" if "містить" in op else f"{v}%")
                 continue
             if f is not None and f.type in ("number", "integer"):
                 v = float(str(v).replace(",", "."))
@@ -118,6 +115,83 @@ class Query:
         if s.get("limit"):
             t += f", лише перші {s['limit']}"
         return t + "."
+
+
+def _ids(db: Database, table: str, where: list) -> tuple[str, list, list[int]]:
+    """Записи, що відповідають умовам: (SQL-підзапит, параметри, id)."""
+    qq = Query(db, {"table": table, "fields": [{"name": "id"}], "where": where})
+    sub = qq.sql()
+    return sub, list(qq.params), [r[0] for r in db.con.execute(sub, qq.params)]
+
+
+def action(db: Database, spec: dict, preview: bool = False) -> dict:
+    """Запит-дія (програма: «запити на додавання, оновлення та видалення»).
+    spec: {"table", "action": "insert"|"update"|"delete", "set": {поле: значення}, "where": [...]}
+    Виконується через перевірки InterData (типи, обов'язковість, зв'язки) і пишеться в історію одним кроком —
+    «Повернути» (Ctrl+Z) скасовує всю дію. preview=True — лише показати SQL і скільки записів зачепить."""
+    import time
+    t, act = spec["table"], spec["action"]
+    vals = spec.get("set") or {}
+    if act == "insert":
+        sql = f"INSERT INTO {q(t)} ({', '.join(map(q, vals))}) VALUES ({', '.join('?' * len(vals))})"
+        if preview:
+            return {"sql": sql, "count": 1, "words": f"Додати до «{t}» запис: " + ", ".join(f"{k} = {v}" for k, v in vals.items())}
+        rid = db.insert(t, vals)
+        return {"sql": sql, "count": 1, "ids": [rid]}
+    sub, params, ids = _ids(db, t, spec.get("where", []))
+    cond = " і ".join(f"«{w['field']}» {w['op']} {w.get('value', '')}".strip() for w in spec.get("where", [])) or "усі записи"
+    if act == "update":
+        sql = f"UPDATE {q(t)} SET {', '.join(q(k) + ' = ?' for k in vals)}\nWHERE id IN ({sub})"
+        words = f"У «{t}» для записів, де {cond}, встановити " + ", ".join(f"«{k}» = {v}" for k, v in vals.items())
+    elif act == "delete":
+        sql = f"DELETE FROM {q(t)}\nWHERE id IN ({sub})"
+        words = f"Видалити з «{t}» записи, де {cond}"
+    else:
+        raise DataError("Невідома дія запиту.")
+    if preview:
+        return {"sql": sql, "count": len(ids), "words": words + f" — зачепить {len(ids)} зап."}
+    db._batch = int(time.time() * 1000)
+    try:
+        for rid in ids:
+            if act == "update":
+                db.update(t, rid, vals)
+            else:
+                db.delete(t, rid, mode="clear")
+    finally:
+        db._batch = 0
+    return {"sql": sql, "count": len(ids), "ids": ids, "words": words}
+
+
+_FORBID = re.compile(r"\b(drop|alter|attach|detach|pragma|vacuum|create)\b|_id_", re.IGNORECASE)
+
+
+def run_sql_write(db: Database, sql: str) -> int:
+    """Пісочниця SQL для INSERT/UPDATE/DELETE: перед виконанням — знімок бази, «Повернути як було» відновлює його.
+    Структуру (CREATE/DROP/ALTER) і службові таблиці змінювати не можна."""
+    if not re.match(r"^\s*(insert|update|delete)\b", sql, re.IGNORECASE) or _FORBID.search(sql) or ";" in sql.strip().rstrip(";"):
+        raise DataError("Тут можна один запит INSERT, UPDATE або DELETE до таблиць користувача.")
+    import sqlite3
+    snap = sqlite3.connect(":memory:")
+    db.con.backup(snap)
+    try:
+        with db.con:
+            cur = db.con.execute(sql)
+    except Exception as e:  # noqa: BLE001
+        snap.close()
+        raise DataError(f"SQL не виконався: {e}") from None
+    db._snapshot = snap
+    return cur.rowcount
+
+
+def restore_snapshot(db: Database) -> bool:
+    """«Повернути як було» після SQL-пісочниці."""
+    snap = getattr(db, "_snapshot", None)
+    if snap is None:
+        return False
+    snap.backup(db.con)
+    snap.close()
+    db._snapshot = None
+    return True
 
 
 def run_sql(db: Database, sql: str) -> tuple[list[str], list[tuple]]:

@@ -142,3 +142,68 @@ assert {(r["Прізвище"], r["Клас"]) for r in n.rows("Учні")} == b
 n.update("Класи", n.find_by_label("Класи", "5-А"), {"Керівник": "Нова Н. Н."})
 assert len(n.rows("Класи")) == 3 and not n.normalize_hints("Учні")
 print("НОРМАЛІЗАЦІЯ OK")
+
+# --- програма МОН: заперечення, запити-дії, SQL-пісочниця, N:M, класифікація зв'язків ---
+from shkola_office.data.query import action, restore_snapshot, run_sql_write  # noqa: E402
+cols, res = Query(j, {"table": "Оцінки", "fields": [{"name": "Предмет"}],
+                      "where": [{"field": "Предмет", "op": "не містить", "value": "мова"}]}).run()
+assert res and all("мова" not in r[0] for r in res)
+n_math = len([r for r in j.rows("Оцінки") if r["Предмет"] == "Математика"])
+pv = action(j, {"table": "Оцінки", "action": "update", "set": {"Бал": "12"},
+                "where": [{"field": "Предмет", "op": "=", "value": "Математика"}]}, preview=True)
+assert pv["count"] == n_math and pv["sql"].startswith('UPDATE "Оцінки" SET "Бал" = ?')
+action(j, {"table": "Оцінки", "action": "update", "set": {"Бал": "12"},
+           "where": [{"field": "Предмет", "op": "=", "value": "Математика"}]})
+assert all(r["Бал"] == 12 for r in j.rows("Оцінки") if r["Предмет"] == "Математика")
+j.undo()
+assert not all(r["Бал"] == 12 for r in j.rows("Оцінки") if r["Предмет"] == "Математика"), "одна дія = один крок назад"
+try:
+    action(j, {"table": "Оцінки", "action": "update", "set": {"Бал": "багато"}, "where": []})
+    raise AssertionError("type check")
+except DataError:
+    pass
+before = len(j.rows("Оцінки"))
+d = action(j, {"table": "Оцінки", "action": "delete", "where": [{"field": "Бал", "op": "<", "value": "5"}]})
+assert len(j.rows("Оцінки")) == before - d["count"]
+j.undo()
+assert len(j.rows("Оцінки")) == before
+assert run_sql_write(j, 'UPDATE "Оцінки" SET "Бал" = 1') == before
+assert all(r["Бал"] == 1 for r in j.rows("Оцінки"))
+assert restore_snapshot(j) and not all(r["Бал"] == 1 for r in j.rows("Оцінки"))
+for bad in ('DROP TABLE "Учні"', 'DELETE FROM _id_fields', 'UPDATE "Учні" SET "Ім\'я"=1; DELETE FROM "Учні"'):
+    try:
+        run_sql_write(j, bad)
+        raise AssertionError(bad)
+    except DataError:
+        pass
+j.create_table("Гуртки", [Field("Назва", required=True, unique=True)])
+j.insert("Гуртки", {"Назва": "Робототехніка"})
+jt = j.add_many_to_many("Учні", "Гуртки")
+lf = [f.name for f in j.fields(jt)]
+j.insert(jt, {"Учні": 1, "Гуртки": 1})
+try:
+    j.insert(jt, {lf[0]: 1, lf[1]: 1})
+    raise AssertionError("N:M без дублів")
+except Exception:
+    pass
+kinds = {(r["from"], r["to"], r["kind"]) for r in j.relations()}
+assert ("Учні", "Гуртки", "N:M") in kinds and ("Учні", "Оцінки", "1:N") in kinds, kinds
+assert any(r["required"] for r in j.relations() if r["kind"] == "1:N")
+print("ПРОГРАМА МОН (запити-дії, N:M) OK")
+
+# --- навчальний шар: SQL кожної дії, завдання з перевіркою ---
+from shkola_office.data.tasks import check, explain_sql, open_task, save_task  # noqa: E402
+j.update("Учні", 1, {"Ім'я": "Остап"})
+s = explain_sql(j.history(limit=1)[0])
+assert s == 'UPDATE "Учні" SET "Ім\'я" = \'Остап\' WHERE id = 1;', s
+etalon = {"table": "Оцінки", "fields": [{"name": "Учень"}, {"name": "Бал"}], "where": [{"field": "Бал", "op": "≥", "value": "10"}]}
+save_task(j, D / "zavd.itask", "Відмінники", "Виведіть учнів і бали, де бал не менше 10", etalon)
+sdb, task = open_task(D / "zavd.itask", D / "student")
+assert task["title"] == "Відмінники" and "Виведіть" in task["condition"]
+ok, msg = check(sdb, task, 'SELECT "Учень", "Бал" FROM "_id_v_Оцінки" WHERE "Бал" >= 10')
+assert ok, msg
+ok, msg = check(sdb, task, 'SELECT "Учень", "Бал" FROM "_id_v_Оцінки" WHERE "Бал" > 10')
+assert not ok and "Рядків" in msg, msg
+ok, msg = check(sdb, task, {"table": "Оцінки", "fields": [{"name": "Учень"}], "where": []})
+assert not ok and "Стовпців" in msg
+print("НАВЧАЛЬНИЙ ШАР OK")

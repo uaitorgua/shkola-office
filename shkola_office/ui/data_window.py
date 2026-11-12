@@ -113,7 +113,12 @@ class Schema(QGraphicsView):
             h = 34 + 20 * len(fs)
             sc.addRect(QRectF(x, y, 220, h), QPen(QColor("#135548"), 2), QBrush(QColor("#ffffff")))
             sc.addRect(QRectF(x, y, 220, 30), QPen(Qt.PenStyle.NoPen), QBrush(QColor("#135548")))
+            nm = next((r for r in db.relations() if r["kind"] == "N:M" and r["via"] == t), None)
             tt = sc.addText(t, QFont("Segoe UI", 11, QFont.Weight.Bold))
+            if nm:
+                note = sc.addText(f"проміжна: {nm['from']} ∞ — ∞ {nm['to']}", QFont("Segoe UI", 9))
+                note.setDefaultTextColor(QColor("#8a5a00"))
+                note.setPos(x, y + 34 + 20 * len(fs) + 2)
             tt.setDefaultTextColor(QColor("#ffffff"))
             tt.setPos(x + 6, y + 2)
             for j, f in enumerate(fs):
@@ -138,8 +143,14 @@ class Schema(QGraphicsView):
                     path.lineTo(mid, a.y())
                     path.lineTo(mid, b.y())
                     path.lineTo(b)
-                    item = sc.addPath(path, pen)
+                    lp = QPen(pen)
+                    if not f.required:                               # необов'язковий зв'язок — пунктир
+                        lp.setStyle(Qt.PenStyle.DashLine)
+                    item = sc.addPath(path, lp)
                     item.setZValue(-1)                               # лінії під картками таблиць
+                    lab = sc.addText("1 — 1" if f.unique else "1 — ∞", QFont("Segoe UI", 9, QFont.Weight.Bold))
+                    lab.setDefaultTextColor(QColor("#8a5a00"))
+                    lab.setPos(mid + 4, (a.y() + b.y()) / 2 - 10)
                     sc.addEllipse(b.x() - 4, b.y() - 4, 8, 8, pen, QBrush(QColor("#e0a526")))
         self.setScene(sc)
 
@@ -208,6 +219,7 @@ class DataWindow(QMainWindow):
         g.big("Повернути", "undo", self.undo, key="Ctrl+Z", tip="Повернути як було останню зміну (разом із каскадом)")
         g = t.group("Поля")
         g.big("Нове поле", "layers", self.add_field)
+        g.big("Зв'язок ∞—∞", "merge", self.add_nm, tip="Багато-до-багатьох через проміжну таблицю (напр. Учні ↔ Гуртки)")
         g.big("Змінити тип", "wand", self.change_type, tip="Змінити тип поля з перевіркою записів, що не підходять")
         g = t.group("Навчання")
         g.big("Нормалізація", "merge", self.normalize, tip="Знайти повтори й винести їх в окрему таблицю зі зв'язком")
@@ -222,6 +234,11 @@ class DataWindow(QMainWindow):
         g.big("Новий", "search", self.new_query)
         g.big("Виконати", "eye", self.run_query, key="F5")
         g.big("Зберегти", "save", self.save_query)
+        g = qt.group("Дія над записами")
+        g.big("Оновити", "edit", lambda: self.action_query("update"),
+              tip="Змінити значення поля в усіх записах, що відповідають умовам конструктора")
+        g.big("Видалити", "trash", lambda: self.action_query("delete"),
+              tip="Видалити всі записи, що відповідають умовам конструктора")
         g = qt.group("SQL")
         g.big("Виконати SQL", "formula", self.run_raw_sql, tip="Пісочниця: лише читання")
         ft = rb.tab("Форми")
@@ -235,6 +252,11 @@ class DataWindow(QMainWindow):
         g.big("Друк / PDF", "print", self.report_pdf)
         g.big("У DOCX", "file-word", lambda: self.report_export("docx"), tip="Відкриється в InterText і в інших редакторах документів")
         g.big("У XLSX", "file-excel", lambda: self.report_export("xlsx"), tip="Відкриється в InterTab і в інших табличних редакторах")
+        nt = rb.tab("Навчання")
+        g = nt.group("Завдання з перевіркою")
+        g.big("Створити", "new", self.make_task, tip="Зберегти базу й поточний запит як еталон завдання (.itask)")
+        g.big("Відкрити", "folder-open", self.load_task, tip="Відкрити завдання вчителя (.itask)")
+        g.big("Перевірити", "check", self.check_task, key="F9", tip="Звірити ваш запит з еталоном")
         sc = rb.tab("Схема")
         g = sc.group("Зв'язки")
         g.big("Схема бази", "merge", self.show_schema)
@@ -338,6 +360,8 @@ class DataWindow(QMainWindow):
         self.q_sql = QPlainTextEdit()
         self.q_sql.setMaximumHeight(110)
         self.q_sql.setFont(QFont("Consolas", 10))
+        self._sql_edited = False
+        self.q_sql.textChanged.connect(lambda: setattr(self, "_sql_edited", self.q_sql.hasFocus()))
         lay.addWidget(QLabel("SQL (оновлюється сам; можна змінити й натиснути «Виконати SQL»):"))
         lay.addWidget(self.q_sql)
         self.q_res = QTableWidget()
@@ -556,6 +580,7 @@ class DataWindow(QMainWindow):
     # ---------- таблиці ----------
     def open_table(self, name: str) -> None:
         self.cur_table = name
+        self.grid.setSortingEnabled(False)
         self.stack.setCurrentWidget(self.pages["table"])
         fs = self.db.fields(name)
         self._types = {f.name: f.type for f in fs}
@@ -573,11 +598,16 @@ class DataWindow(QMainWindow):
                     it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     it.setBackground(QColor("#f4f8f6"))
         self.grid.blockSignals(False)
+        self.grid.setSortingEnabled(True)              # сортування кліком по заголовку стовпця
         links = self.db.links_to(name)
         self.t_title.setText(f"<b>{name}</b> — записів: {len(rows)}" +
                              (f"; на неї посилаються: {', '.join(t for t, _ in links)}" if links else ""))
-        self.t_hint.setText("Клітинку можна правити прямо в таблиці: значення перевіряється одразу. "
-                            "Посилання — пишіть назву запису (напр. «5-А»). Формули рахуються самі.")
+        from ..data.tasks import explain_sql
+        last = self.db.history(limit=1)
+        self.t_hint.setText(("<b>Остання дія в SQL:</b> <code>" + explain_sql(last[0]).replace("<", "&lt;") + "</code><br>"
+                             if last else "") +
+                            "Клітинку можна правити прямо в таблиці (значення перевіряється одразу), сортувати — кліком по "
+                            "заголовку. Посилання — пишіть назву запису (напр. «5-А»). Формули рахуються самі.")
 
     def _filter(self, text: str) -> None:
         t = text.lower()
@@ -648,6 +678,12 @@ class DataWindow(QMainWindow):
         return False
 
     def undo(self) -> None:
+        from ..data.query import restore_snapshot
+        if restore_snapshot(self.db):                     # після SQL-пісочниці — назад до знімка
+            self.statusBar().showMessage("Повернуто як було до SQL-запиту", 6000)
+            if self.cur_table:
+                self.open_table(self.cur_table)
+            return
         try:
             self.statusBar().showMessage(self.db.undo(), 6000)
             if self.cur_table:
@@ -798,12 +834,124 @@ class DataWindow(QMainWindow):
         self._q_live()
 
     def run_raw_sql(self) -> None:
+        import re as _re
+        from ..data.query import run_sql_write
+        sql = self.q_sql.toPlainText()
+        if _re.match(r"^\s*(insert|update|delete)\b", sql, _re.IGNORECASE):
+            try:
+                n = run_sql_write(self.db, sql)
+                self.q_words.setText(f"Виконано: змінено записів — {n}. «Повернути» (Ctrl+Z) поверне базу як було.")
+                self.refresh_nav()
+            except DataError as e:
+                self._err(e)
+            return
         try:
             cols, rows = run_sql(self.db, self.q_sql.toPlainText())
             fill_table(self.q_res, cols, rows)
             self.q_words.setText("Виконано SQL, набраний вручну (лише читання).")
         except DataError as e:
             self._err(e)
+
+    def action_query(self, kind: str, field: str | None = None, value: str | None = None, ask=None) -> int:
+        """Запит-дія за умовами конструктора: показує SQL і кількість записів, питає підтвердження."""
+        from ..data.query import action
+        spec = {"table": self.q_table.currentText(), "action": kind, "where": self.q_spec()["where"]}
+        if kind == "update":
+            if field is None:
+                names = [f.name for f in self.db.fields(spec["table"]) if f.type != "formula"]
+                field, ok = QInputDialog.getItem(self, "Оновити записи", "Яке поле змінити?", names, 0, False)
+                if not ok:
+                    return 0
+                value, ok = QInputDialog.getText(self, "Оновити записи", f"Нове значення «{field}»:")
+                if not ok:
+                    return 0
+            spec["set"] = {field: value}
+        try:
+            pv = action(self.db, spec, preview=True)
+        except DataError as e:
+            self._err(e)
+            return 0
+        self.q_sql.setPlainText(pv["sql"])
+        self.q_words.setText(pv["words"])
+        q = pv["words"] + ". Виконати? («Повернути» скасує всю дію)"
+        if not (ask(q) if ask else QMessageBox.question(self, "Запит-дія", q) == QMessageBox.StandardButton.Yes):
+            return 0
+        try:
+            res = action(self.db, spec)
+        except DataError as e:
+            self._err(e)
+            return 0
+        self.statusBar().showMessage(f"Змінено записів: {res['count']}", 6000)
+        self._q_live()
+        return res["count"]
+
+    # ---------- навчання ----------
+    def add_nm(self, a: str | None = None, b: str | None = None) -> str:
+        ts = self.db.tables() if self.db else []
+        if len(ts) < 2:
+            return ""
+        if a is None:
+            a, ok = QInputDialog.getItem(self, "Зв'язок ∞—∞", "Перша таблиця:", ts, 0, False)
+            if not ok:
+                return ""
+            b, ok = QInputDialog.getItem(self, "Зв'язок ∞—∞", "Друга таблиця:", [x for x in ts if x != a], 0, False)
+            if not ok:
+                return ""
+        try:
+            name = self.db.add_many_to_many(a, b)
+        except DataError as e:
+            self._err(e)
+            return ""
+        self.refresh_nav()
+        self.open_table(name)
+        self.statusBar().showMessage(f"Створено проміжну таблицю «{name}»: кожен рядок — пара {a} ↔ {b}", 8000)
+        return name
+
+    def make_task(self, path: str | None = None, title: str | None = None, condition: str | None = None) -> None:
+        from ..data.tasks import save_task
+        if not self.db:
+            return
+        if title is None:
+            title, ok = QInputDialog.getText(self, "Завдання", "Назва завдання:")
+            if not ok:
+                return
+            condition, ok = QInputDialog.getMultiLineText(self, "Завдання", "Умова для учня:")
+            if not ok:
+                return
+        p = path or QFileDialog.getSaveFileName(self, "Зберегти завдання", f"{title}.itask", "Завдання InterData (*.itask)")[0]
+        if not p:
+            return
+        sql = self.q_sql.toPlainText().strip()
+        answer = sql if getattr(self, "_sql_edited", False) else self.q_spec()
+        try:
+            save_task(self.db, Path(p), title, condition, answer)
+            self.statusBar().showMessage(f"Завдання збережено: {p}", 6000)
+        except DataError as e:
+            self._err(e)
+
+    def load_task(self, path: str | None = None) -> None:
+        from ..data.tasks import open_task
+        p = path or QFileDialog.getOpenFileName(self, "Відкрити завдання", "", "Завдання InterData (*.itask)")[0]
+        if not p:
+            return
+        self.db, self.task = open_task(Path(p))
+        self.path = Path(self.db.path)
+        self.refresh_nav()
+        self.new_query()
+        self.q_words.setText(f"<b>Завдання «{self.task['title']}»:</b> {self.task['condition']}<br>"
+                             "Складіть запит у конструкторі або напишіть SQL і натисніть «Перевірити» (F9).")
+
+    def check_task(self) -> bool:
+        from ..data.tasks import check
+        task = getattr(self, "task", None)
+        if not task:
+            self._err("Спершу відкрийте завдання (вкладка «Навчання» → «Відкрити»).")
+            return False
+        sql = self.q_sql.toPlainText().strip()
+        student = sql if getattr(self, "_sql_edited", False) else self.q_spec()
+        ok, msg = check(self.db, task, student)
+        self.q_words.setText(("✅ " if ok else "❌ ") + msg + f"<br><i>Завдання: {task['condition']}</i>")
+        return ok
 
     def save_query(self) -> None:
         n, ok = QInputDialog.getText(self, "Зберегти запит", "Назва запиту:", text=self.q_name)
