@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QGraphicsScene, QGraphicsView, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
@@ -15,6 +15,7 @@ from ..config import APP_NAME
 from ..data.db import TYPES, Database, DataError, Field, HasDependents
 from ..data.query import AGG, OPS, Query, auto_form, report, report_html, report_xlsx, run_sql, sub_rows
 from ..data.samples import SAMPLES, build as build_sample
+from . import icons
 from .banner import Banner
 from .logo import app_icon
 from .ribbon import RIBBON_STYLE, Ribbon
@@ -161,13 +162,23 @@ class DataWindow(QMainWindow):
         self.setWindowTitle(f"{INTERDATA} · {APP_NAME}")
         self.setWindowIcon(app_icon())
         self.resize(1320, 820)
-        self.setStyleSheet(RIBBON_STYLE + "QTreeWidget{font-size:13px} QLabel#words{color:#135548;font-size:14px;"
+        self.setStyleSheet(RIBBON_STYLE + "QTreeWidget#idnav{font-size:13px;background:#f7faf9;border:none;"
+                           "border-right:1px solid #dfe9e5;padding:6px 4px}"
+                           "QTreeWidget#idnav::item{padding:2px 6px;border-radius:6px;color:#1f2d2a}"
+                           "QTreeWidget#idnav::item:hover{background:#e8f3ef}"
+                           "QTreeWidget#idnav::item:selected{background:#d5ece4;color:#0f3f35}"
+                           " QTreeWidget{font-size:13px} QLabel#words{color:#135548;font-size:14px;"
                            "background:#eef7f3;border-radius:8px;padding:8px} QLabel#hint{color:#5b6b67}")
         self.db: Database | None = None
         self.path: Path | None = None
         self.nav = QTreeWidget()
         self.nav.setHeaderHidden(True)
-        self.nav.setMinimumWidth(220)
+        self.nav.setMinimumWidth(250)
+        self.nav.setIndentation(14)
+        self.nav.setRootIsDecorated(False)
+        self.nav.setIconSize(QSize(18, 18))
+        self.nav.setObjectName("idnav")
+        self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.nav.itemClicked.connect(self._nav)
         self.stack = QStackedWidget()
         self.stack.currentChanged.connect(self._sync_ribbon)
@@ -440,16 +451,33 @@ class DataWindow(QMainWindow):
             return
         objs = {"Таблиці": self.db.tables(), "Запити": list(self.db.objects("query")),
                 "Форми": self.db.tables(), "Звіти": list(self.db.objects("report"))}
+        ic = {"Таблиці": "table", "Запити": "search", "Форми": "file-lines", "Звіти": "sheet"}
+        nm_tables = {r["via"] for r in self.db.relations() if r["kind"] == "N:M"}
+        head_font = QFont("Segoe UI", 10, QFont.Weight.Bold)
         for b in BLOCKS:
-            top = QTreeWidgetItem([b])
-            top.setFont(0, QFont("Segoe UI", 11, QFont.Weight.Bold))
+            top = QTreeWidgetItem([f"{b.upper()}   {len(objs[b])}"])
+            top.setFont(0, head_font)
+            top.setForeground(0, QColor("#135548"))
+            top.setIcon(0, icons.icon(ic[b]))
+            top.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            top.setSizeHint(0, QSize(0, 34))
             for n in objs[b]:
-                it = QTreeWidgetItem([n])
+                it = QTreeWidgetItem([n + ("   ∞—∞" if b == "Таблиці" and n in nm_tables else "")])
                 it.setData(0, Qt.ItemDataRole.UserRole, (b, n))
+                it.setSizeHint(0, QSize(0, 26))
                 top.addChild(it)
+            if not objs[b]:
+                hint = QTreeWidgetItem(["порожньо — " + {"Запити": "збережіть запит", "Звіти": "збережіть звіт"}.get(b, "створіть таблицю")])
+                hint.setForeground(0, QColor("#9aa7a3"))
+                hint.setFlags(Qt.ItemFlag.NoItemFlags)
+                top.addChild(hint)
             self.nav.addTopLevelItem(top)
             top.setExpanded(True)
-        sch = QTreeWidgetItem(["Схема зв'язків"])
+        sch = QTreeWidgetItem(["СХЕМА ЗВ'ЯЗКІВ"])
+        sch.setFont(0, head_font)
+        sch.setForeground(0, QColor("#135548"))
+        sch.setIcon(0, icons.icon("merge"))
+        sch.setSizeHint(0, QSize(0, 34))
         sch.setData(0, Qt.ItemDataRole.UserRole, ("Схема", ""))
         self.nav.addTopLevelItem(sch)
         self.q_table.blockSignals(True)
