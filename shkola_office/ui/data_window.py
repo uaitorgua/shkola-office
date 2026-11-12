@@ -127,10 +127,19 @@ class Schema(QGraphicsView):
             for f in db.fields(t):
                 if f.type == "link" and f.link in boxes:
                     x, y, h, idx = boxes[t]
-                    a = QPointF(x, y + 44 + 20 * idx[f.name])
                     bx, by, bh, _ = boxes[f.link]
-                    b = QPointF(bx + 220, by + 15)
-                    sc.addLine(a.x(), a.y(), b.x(), b.y(), pen)
+                    fy = y + 44 + 20 * idx[f.name]
+                    left = bx + 110 < x + 110                       # довідник ліворуч — лінія з лівого краю
+                    a = QPointF(x if left else x + 220, fy)
+                    b = QPointF(bx + 220 if left else bx, by + 15)
+                    mid = (a.x() + b.x()) / 2 if abs(a.x() - b.x()) > 40 else a.x() + (-30 if left else 30)
+                    from PySide6.QtGui import QPainterPath
+                    path = QPainterPath(a)
+                    path.lineTo(mid, a.y())
+                    path.lineTo(mid, b.y())
+                    path.lineTo(b)
+                    item = sc.addPath(path, pen)
+                    item.setZValue(-1)                               # лінії під картками таблиць
                     sc.addEllipse(b.x() - 4, b.y() - 4, 8, 8, pen, QBrush(QColor("#e0a526")))
         self.setScene(sc)
 
