@@ -31,6 +31,8 @@
 
 - ✔ 12.11.2026 Обов'язкова перевірка оновлень (лише в `app.main`, не в редакторах усередині Сканера): `shkola_office/updater.py` + `ui/update_check.py`, портативний EXE із самопідміною; сайт https://uait.org.ua/ofis/ (`OfisShkola-<версія>.exe`, `version.json` — заливати останнім); тест `tests/test_update.py` (змінна OFIS_UPDATE_BASE). Версія 1.0.1 (MSIX 1.0.1.0 зібрано, у Store не подано).
 
+- ✔ 12.11.2026 (зміна) Оновлення ЛИШЕ через Microsoft Store: `updater.py` читає каталог Microsoft (displaycatalog, PRODUCT_ID 9P6Q3GQW1SQF, пакет UAIT.6376305965CB0); якщо новіша — «Оновити в Microsoft Store»/«Вийти». Поки програми немає в Store — нічого не просить. Сервер uait.org.ua/ofis більше не використовується (файли 1.0.1 там лишились). Тест: OFIS_CATALOG_URL. Версія 1.0.2, MSIX 1.0.2.0 зібрано, не подано.
+
 ## Далі
 - Підключити в Сканер ШКОЛА (перехідники), потім Накази ШКОЛА — лише на «так» користувача.
 - **InterSlide** — редактор презентацій для шкіл (задум 08.11, деталі в `docs/INTERSLIDE.md`).
