@@ -196,4 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         start.show()
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, start.offer_restore)
+    # Обов'язкова перевірка оновлень — лише в самостійній програмі (main), не в редакторах усередині Сканера
+    from .ui.update_check import UpdateChecker
+    start._updates = UpdateChecker(start)
+    QTimer.singleShot(1500, start._updates.start)
     return app.exec()

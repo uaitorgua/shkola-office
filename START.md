@@ -29,6 +29,8 @@
 
 - ✔ 13.11 Store: «Офіс ШКОЛА» 1.0.0.0 (9P6Q3GQW1SQF) НАДІСЛАНО на сертифікацію (In certification, до 3 робочих днів). Безкоштовно, усі ринки, Education → Instructional tools, IARC 3+ (згода IARC — користувач 13.11), лістинг uk-UA + 5 знімків, політика текстом, runFullTrust обґрунтовано. Оновлення: підняти Version у packaging/store_identity.json, tools/build.py, packaging/make_msix.py, нове подання.
 
+- ✔ 12.11.2026 Обов'язкова перевірка оновлень (лише в `app.main`, не в редакторах усередині Сканера): `shkola_office/updater.py` + `ui/update_check.py`, портативний EXE із самопідміною; сайт https://uait.org.ua/ofis/ (`OfisShkola-<версія>.exe`, `version.json` — заливати останнім); тест `tests/test_update.py` (змінна OFIS_UPDATE_BASE). Версія 1.0.1 (MSIX 1.0.1.0 зібрано, у Store не подано).
+
 ## Далі
 - Підключити в Сканер ШКОЛА (перехідники), потім Накази ШКОЛА — лише на «так» користувача.
 - **InterSlide** — редактор презентацій для шкіл (задум 08.11, деталі в `docs/INTERSLIDE.md`).
