@@ -114,3 +114,15 @@ w2.load(D / "n2.idata")
 w2.open_table("Учні")
 assert w2.normalize(ask=lambda q: "Винести" in q) == 1 and "Класи" in w2.db.tables()
 print("НОРМАЛІЗАЦІЯ У ВІКНІ OK")
+# автоматична нормалізація під час імпорту
+import csv as _csv  # noqa: E402
+with open(D / "klasy.csv", "w", newline="", encoding="utf-8-sig") as fh:
+    wr = _csv.writer(fh, delimiter=";")
+    wr.writerow(["Прізвище", "Клас", "Керівник", "Бал"])
+    for i in range(12):
+        wr.writerow([f"Учень{i}", ["5-А", "5-Б", "6-А"][i % 3], ["Іваненко", "Петренко", "Сидоренко"][i % 3], 5 + i % 7])
+w3 = DataWindow()
+w3.load(D / "klasy.csv")
+assert "Класи" in w3.db.tables() and [f.type for f in w3.db.fields("klasy") if f.name == "Клас"] == ["link"], w3.db.tables()
+assert "Нормалізація" in w3._import_report and len(w3.db.rows("klasy")) == 12
+print("АВТОНОРМАЛІЗАЦІЯ OK")

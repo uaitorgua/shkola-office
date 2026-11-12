@@ -224,8 +224,8 @@ class DataWindow(QMainWindow):
         g.big("Зберегти", "save", self.save_report)
         g = rt.group("Вивести")
         g.big("Друк / PDF", "print", self.report_pdf)
-        g.big("У DOCX", "file-word", lambda: self.report_export("docx"), tip="Відкриється в InterText, Word, LibreOffice")
-        g.big("У XLSX", "file-excel", lambda: self.report_export("xlsx"), tip="Відкриється в InterTab, Excel, LibreOffice")
+        g.big("У DOCX", "file-word", lambda: self.report_export("docx"), tip="Відкриється в InterText і в інших редакторах документів")
+        g.big("У XLSX", "file-excel", lambda: self.report_export("xlsx"), tip="Відкриється в InterTab і в інших табличних редакторах")
         sc = rb.tab("Схема")
         g = sc.group("Зв'язки")
         g.big("Схема бази", "merge", self.show_schema)
@@ -498,8 +498,28 @@ class DataWindow(QMainWindow):
             self._err(e)
             return
         lines = [f"<b>{t}</b>: " + "; ".join(f"{f} — {ty} ({why})" for f, ty, why in rep) for t, rep in res.items()]
-        self.statusBar().showMessage("Імпортовано, типи визначено автоматично", 8000)
+        if self.auto_normalize:                       # повтори одразу в довідники (зв'язки замість копій)
+            for t in res:
+                lines += self._auto_normalize(t)
+        self.statusBar().showMessage("Імпортовано: типи й довідники визначено автоматично", 8000)
         self._import_report = "<br>".join(lines)
+
+    auto_normalize = True
+
+    def _auto_normalize(self, tbl: str) -> list[str]:
+        out = []
+        for h in self.db.normalize_hints(tbl):
+            base = h["cols"][0]
+            name = base + "и" if not base.endswith(("и", "і", "ї")) else base + " (довідник)"
+            if name in self.db.tables():
+                name = f"{base} ({tbl})"
+            try:
+                n = self.db.extract_table(tbl, h["cols"], name)
+                out.append(f"<b>Нормалізація:</b> {', '.join(h['cols'])} з «{tbl}» винесено в довідник «{name}» ({n} записів), "
+                           f"у «{tbl}» тепер зв'язок. {h['why']}")
+            except DataError as e:
+                out.append(f"Нормалізацію «{base}» пропущено: {e}")
+        return out
 
     def import_dialog(self) -> None:
         if not self.db:

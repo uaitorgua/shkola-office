@@ -374,7 +374,8 @@ class SheetWindow(QMainWindow):
 
     # ---------- фільтр, закріплення, підсвітка, шаблони ----------
     def _sel_box(self):
-        cells = self.sheet().selected_cells()
+        s = self.sheet()
+        cells = s.selected_cells() or [(max(0, s.currentRow()), max(0, s.currentColumn()))]
         rs, cs = [r for r, _ in cells], [c for _, c in cells]
         return min(rs), min(cs), max(rs), max(cs)
 

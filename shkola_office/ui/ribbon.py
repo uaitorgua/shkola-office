@@ -46,7 +46,9 @@ class RibbonGroup(QFrame):
     def _action(self, text, icon, slot, key=None, checkable=False, tip=None) -> QAction:
         a = QAction(text, self.owner)
         if slot is not None:
-            a.triggered.connect(slot)
+            # Qt передає в слот checked=False; лямбда з параметром за замовчуванням (lambda k=k: …) прийняла б його
+            # замість свого значення — тому звичайним кнопкам аргумент не передаємо
+            a.triggered.connect(slot if checkable else (lambda *_, s=slot: s()))
         if key:
             a.setShortcut(QKeySequence(key))
         a.setCheckable(checkable)
