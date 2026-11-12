@@ -27,7 +27,7 @@
 
 - ✔ 13.11 Тест усіх кнопок `tests/test_all_buttons.py` (277 дій у 4 застосунках): виправлено 8 вад (кнопки квізу InterSlide отримували False — виправлено в Ribbon для всіх; підсвітка InterTab без виділення). InterData: автоматична нормалізація під час імпорту. Прибрано назви чужих продуктів з інтерфейсу. Store: назву «Офіс ШКОЛА» зарезервовано (9P6Q3GQW1SQF, UAIT.6376305965CB0), `packaging/` (identity, manifest, make_msix.py).
 
-- ⏳ 13.11 Store: подання 1 «Офіс ШКОЛА» (9P6Q3GQW1SQF) заповнене — ціна Free/усі ринки, властивості (Education → Instructional tools, політика текстом), пакет 1.0.0.0 Validated, лістинг uk-UA з 5 знімками, обґрунтування runFullTrust. IARC: рейтинг 3+ згенеровано, потрібна галочка згоди з IARC Terms of Use (лише користувач) → Save → Submit for certification.
+- ✔ 13.11 Store: «Офіс ШКОЛА» 1.0.0.0 (9P6Q3GQW1SQF) НАДІСЛАНО на сертифікацію (In certification, до 3 робочих днів). Безкоштовно, усі ринки, Education → Instructional tools, IARC 3+ (згода IARC — користувач 13.11), лістинг uk-UA + 5 знімків, політика текстом, runFullTrust обґрунтовано. Оновлення: підняти Version у packaging/store_identity.json, tools/build.py, packaging/make_msix.py, нове подання.
 
 ## Далі
 - Підключити в Сканер ШКОЛА (перехідники), потім Накази ШКОЛА — лише на «так» користувача.
